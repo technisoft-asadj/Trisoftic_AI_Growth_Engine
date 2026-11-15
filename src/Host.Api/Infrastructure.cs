@@ -3,6 +3,7 @@ using Serilog.Context;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 using TriSoftic.GrowthEngine.Modules.Ai;
 using TriSoftic.GrowthEngine.Modules.Assets;
+using TriSoftic.GrowthEngine.Modules.Automation;
 using TriSoftic.GrowthEngine.Modules.Content;
 using TriSoftic.GrowthEngine.Modules.Crm;
 using TriSoftic.GrowthEngine.Modules.Governance.Persistence;
@@ -82,6 +83,7 @@ public static class ModuleContexts
         typeof(ContentDbContext),
         typeof(CrmDbContext),
         typeof(SchedulingDbContext),
+        typeof(AutomationDbContext),
     ];
 }
 
@@ -98,6 +100,7 @@ public static class PlatformRegistration
         s.AddContentModule(c);
         s.AddCrmModule(c);
         s.AddSchedulingModule(c);
+        s.AddAutomationModule(c, runScheduler: false);   // the worker host runs the sweep scheduler
         return s;
     }
 
@@ -114,6 +117,7 @@ public static class PlatformRegistration
         app.MapSalesEndpoints();
         app.MapDashboardEndpoints();
         app.MapSchedulingEndpoints();
+        app.MapAutomationEndpoints();
         return app;
     }
 }

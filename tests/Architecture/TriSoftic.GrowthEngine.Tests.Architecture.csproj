@@ -29,6 +29,7 @@
     <ProjectReference Include="..\..\src\Modules\Content\TriSoftic.GrowthEngine.Modules.Content.csproj" />
     <ProjectReference Include="..\..\src\Modules\Crm\TriSoftic.GrowthEngine.Modules.Crm.csproj" />
     <ProjectReference Include="..\..\src\Modules\Scheduling\TriSoftic.GrowthEngine.Modules.Scheduling.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Automation\TriSoftic.GrowthEngine.Modules.Automation.csproj" />
   </ItemGroup>
 
 </Project>

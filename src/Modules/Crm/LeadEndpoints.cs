@@ -48,7 +48,7 @@ public static class LeadEndpoints
     // ---------- public capture (anonymous) ----------
     private static void MapPublic(IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/v1/public/lead-forms/{key}/submit", async (string key, SubmitIn body, HttpContext http, CrmDbContext db, IClock clock, CancellationToken ct) =>
+        app.MapPost("/api/v1/public/lead-forms/{key}/submit", async (string key, SubmitIn body, HttpContext http, CrmDbContext db, IClock clock, IEventPublisher events, CancellationToken ct) =>
         {
             if (http.Request.ContentLength > 32 * 1024) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
             var form = await db.LeadForms.FirstOrDefaultAsync(f => f.PublicKey == key && f.Enabled, ct);
@@ -74,6 +74,7 @@ public static class LeadEndpoints
             var res = await LeadIntake.RunAsync(db, new IntakeRow(body.FirstName, body.LastName, body.Email, body.Phone, body.Company, body.JobTitle, body.Message),
                 form.ProductId, form.CampaignId, form.Id, $"form:{form.Name}", consent, owner, null, now, ct);
             if (!res.IsSuccess) return Results.Problem(statusCode: res.Error!.Kind == ErrorKind.Conflict ? 409 : 400, title: res.Error.Message);
+            if (res.Value!.LeadCreated) await events.PublishAsync(new PlatformEvent("lead.created", form.ProductId, "lead", res.Value.LeadId), ct);
             return Results.Accepted();   // same answer whether or not the person already existed
         }).AllowAnonymous().RequireRateLimiting("public-forms").RequireCors("public-forms");
     }
@@ -153,7 +154,7 @@ public static class LeadEndpoints
             return Results.Ok(new { lead = l, contact = new { contact.Id, contact.DisplayName, contact.JobTitle, contact.CompanyId }, scoreBreakdown = hits, currentRuleScore = score });
         });
 
-        g.MapPost("/leads", async (NewLead req, CrmDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/leads", async (NewLead req, CrmDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             if (!u.HasPermission(Permissions.LeadsManage) || !await u.CanAccessProductAsync(req.ProductId, ct)) return Results.NotFound();
             var contact = await (await CrmEndpoints.VisibleAsync(db, u, false, ct)).FirstOrDefaultAsync(c => c.Id == req.ContactId, ct);
@@ -168,10 +169,11 @@ public static class LeadEndpoints
                 db.Associations.Add(new ContactAssociation { ContactId = contact.Id, ProductId = req.ProductId, CampaignId = req.CampaignId });
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry("crm.lead.created", "Lead", lead.Id.ToString(), lead.ProductId, contact.DisplayName, After: new { lead.Source, lead.Score }), ct);
+            await events.LeadAsync("lead.created", lead, ct);
             return Results.Created($"/api/v1/crm/leads/{lead.Id}", new { lead.Id, lead.Score });
         });
 
-        g.MapPut("/leads/{id:guid}/assign", async (Guid id, AssignIn req, CrmDbContext db, ICurrentUser u, IUserDirectory dir, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPut("/leads/{id:guid}/assign", async (Guid id, AssignIn req, CrmDbContext db, ICurrentUser u, IUserDirectory dir, IClock clock, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             var l = await FindLead(db, u, id, Permissions.LeadsManage, ct);
             if (l is null) return Results.NotFound();
@@ -181,10 +183,11 @@ public static class LeadEndpoints
             db.Interactions.Add(new Interaction { ContactId = l.ContactId, Type = InteractionType.System, ProductId = l.ProductId, Summary = req.UserId is null ? "Lead unassigned" : "Lead assigned", OccurredAt = clock.UtcNow, CreatedBy = u.UserId });
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry("crm.lead.assigned", "Lead", id.ToString(), l.ProductId, Before: new { Owner = before }, After: new { Owner = req.UserId }), ct);
+            if (req.UserId is not null) await events.LeadAsync("lead.assigned", l, ct);
             return Results.NoContent();
         });
 
-        g.MapPost("/leads/{id:guid}/status", async (Guid id, StatusIn req, CrmDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/leads/{id:guid}/status", async (Guid id, StatusIn req, CrmDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             var l = await FindLead(db, u, id, Permissions.LeadsManage, ct);
             if (l is null) return Results.NotFound();
@@ -205,6 +208,7 @@ public static class LeadEndpoints
             db.Interactions.Add(new Interaction { ContactId = l.ContactId, Type = InteractionType.System, ProductId = l.ProductId, Summary = $"Lead {before} -> {l.Status}" + (string.IsNullOrWhiteSpace(req.Reason) ? "" : $" ({req.Reason})"), OccurredAt = now, CreatedBy = u.UserId });
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry("crm.lead.status-changed", "Lead", id.ToString(), l.ProductId, Before: new { Status = before }, After: new { l.Status, req.Reason, req.Note }), ct);
+            await events.LeadAsync("lead.status-changed", l, ct, previousStatus: before.ToString());
             return Results.Ok(new { l.Id, l.Status });
         });
 
@@ -285,7 +289,7 @@ public static class LeadEndpoints
     // ---------- CSV import ----------
     private static void MapImport(RouteGroupBuilder g)
     {
-        g.MapPost("/products/{productId:guid}/leads/import", async (Guid productId, bool? dryRun, HttpRequest req, CrmDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/products/{productId:guid}/leads/import", async (Guid productId, bool? dryRun, HttpRequest req, CrmDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             if (!u.HasPermission(Permissions.LeadsManage) || !await u.CanAccessProductAsync(productId, ct)) return Results.NotFound();
             if (!req.HasFormContentType) return Results.Problem(statusCode: 400, title: "Expected multipart/form-data with a CSV file");
@@ -307,6 +311,7 @@ public static class LeadEndpoints
 
             var preview = dryRun == true;
             await using var tx = await db.Database.BeginTransactionAsync(ct);
+            var newLeadIds = new List<Guid>();
             var errors = new List<object>(); int created = 0, existing = 0, leads = 0, attached = 0, consentRows = 0;
             var now = clock.UtcNow;
             for (var i = 1; i < rows.Count; i++)
@@ -319,11 +324,12 @@ public static class LeadEndpoints
                     productId, null, null, Cell(r, "source") is { } s ? $"import:{s}" : "import", consent, u.UserId, u.UserId, now, ct);
                 if (!res.IsSuccess) { errors.Add(new { row = i + 1, message = res.Error!.Message }); db.ChangeTracker.Clear(); continue; }
                 if (res.Value!.ContactCreated) created++; else existing++;
-                if (res.Value.LeadCreated) leads++; else attached++;
+                if (res.Value.LeadCreated) { leads++; newLeadIds.Add(res.Value.LeadId); } else attached++;
                 if (claimsConsent) consentRows++;
             }
             if (preview) await tx.RollbackAsync(ct); else await tx.CommitAsync(ct);
             db.ChangeTracker.Clear();
+            if (!preview) foreach (var leadId in newLeadIds) await events.PublishAsync(new PlatformEvent("lead.created", productId, "lead", leadId), ct);
             if (!preview) await audit.WriteAsync(new AuditEntry("crm.leads.imported", "Lead", null, productId, file.FileName, After: new { total = rows.Count - 1, created, existing, leads, attached, errors = errors.Count, consentRows }), ct);
             return Results.Ok(new { dryRun = preview, total = rows.Count - 1, contactsCreated = created, contactsMatched = existing, leadsCreated = leads, attachedToOpenLead = attached, rowsWithConsent = consentRows, errors });
         }).DisableAntiforgery();

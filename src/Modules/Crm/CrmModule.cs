@@ -14,6 +14,8 @@ public static class CrmModule
     {
         s.AddModuleDbContext<CrmDbContext>(c, CrmDbContext.Schema);
         s.AddScoped<IContactPolicy, ContactPolicy>();
+        s.AddScoped<ISubjectStateProvider, LeadStateProvider>();
+        s.AddScoped<ISubjectStateProvider, OpportunityStateProvider>();
 
         // Public lead forms are anonymous and embeddable on other sites: no credentials, POST only.
         s.AddCors(o => o.AddPolicy(PublicFormsPolicy, p => p.AllowAnyOrigin().WithMethods("POST").WithHeaders("Content-Type")));

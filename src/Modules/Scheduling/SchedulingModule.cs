@@ -34,6 +34,7 @@ public static partial class SchedulingModule
     public static IServiceCollection AddSchedulingModule(this IServiceCollection s, IConfiguration c)
     {
         s.AddModuleDbContext<SchedulingDbContext>(c, SchedulingDbContext.Schema);
+        s.AddScoped<ISubjectStateProvider, BookingStateProvider>();
         // The booking page is embeddable and anonymous: no credentials, simple requests only.
         s.AddCors(o => o.AddPolicy(PublicPolicy, p => p.AllowAnyOrigin().WithMethods("GET", "POST").WithHeaders("Content-Type")));
         return s;
@@ -269,7 +270,7 @@ public static partial class SchedulingModule
             return Results.Ok((await q.OrderBy(b => b.StartUtc).Take(500).ToListAsync(ct)).Select(BookingDto));
         });
 
-        g.MapPost("/bookings", async (InternalBookIn req, SchedulingDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/bookings", async (InternalBookIn req, SchedulingDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             var t = await db.Types.AsNoTracking().FirstOrDefaultAsync(x => x.Id == req.AppointmentTypeId && x.Enabled, ct);
             if (t is null || !u.HasPermission(Permissions.AppointmentsManage) || !await u.CanAccessProductAsync(t.ProductId, ct)) return Results.NotFound();
@@ -284,10 +285,11 @@ public static partial class SchedulingModule
             var (b, error) = await PlaceAsync(db, t, req.Start.ToUniversalTime(), template, null, clock.UtcNow, ct);
             if (b is null) return Results.Problem(statusCode: 409, title: error);
             await audit.WriteAsync(new AuditEntry("scheduling.booking.created", "Booking", b.Id.ToString(), b.ProductId, b.AttendeeName, After: new { b.StartUtc, b.StaffUserId, b.LeadId }), ct);
+            await events.PublishAsync(new PlatformEvent("booking.created", b.ProductId, "booking", b.Id), ct);
             return Results.Created($"/api/v1/scheduling/bookings/{b.Id}", BookingDto(b));
         });
 
-        g.MapPost("/bookings/{id:guid}/cancel", async (Guid id, CancelIn req, SchedulingDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/bookings/{id:guid}/cancel", async (Guid id, CancelIn req, SchedulingDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             var b = await db.Bookings.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (b is null || !u.HasPermission(Permissions.AppointmentsManage) || !await u.CanAccessProductAsync(b.ProductId, ct)) return Results.NotFound();
@@ -295,6 +297,7 @@ public static partial class SchedulingModule
             b.Status = BookingStatus.Cancelled; b.CancelledAt = clock.UtcNow; b.CancelReason = req.Reason?[..Math.Min(req.Reason.Length, 500)];
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry("scheduling.booking.cancelled", "Booking", id.ToString(), b.ProductId, b.AttendeeName, After: new { req.Reason, By = "staff" }), ct);
+            await events.PublishAsync(new PlatformEvent("booking.cancelled", b.ProductId, "booking", b.Id), ct);
             return Results.NoContent();
         });
     }
@@ -343,7 +346,7 @@ public static partial class SchedulingModule
             return Results.Ok(slots.Select(s => new { start = s.Start, end = s.End }));   // staff identities are never exposed
         });
 
-        g.MapPost("/{key}/book", async (string key, PublicBookIn req, HttpContext http, SchedulingDbContext db, IClock clock, IConfiguration cfg, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/{key}/book", async (string key, PublicBookIn req, HttpContext http, SchedulingDbContext db, IClock clock, IConfiguration cfg, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             if (http.Request.ContentLength > 16 * 1024) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
             var t = await db.Types.AsNoTracking().FirstOrDefaultAsync(x => x.PublicKey == key && x.Enabled, ct);
@@ -362,6 +365,7 @@ public static partial class SchedulingModule
             var (b, error) = await PlaceAsync(db, t, req.Start.ToUniversalTime(), template, null, clock.UtcNow, ct);
             if (b is null) return Results.Problem(statusCode: 409, title: error);
             await audit.WriteAsync(new AuditEntry("scheduling.booking.created", "Booking", b.Id.ToString(), b.ProductId, b.AttendeeName, After: new { b.StartUtc, Source = "public", b.LeadId }), ct);
+            await events.PublishAsync(new PlatformEvent("booking.created", b.ProductId, "booking", b.Id), ct);
             return Results.Created($"/api/v1/public/booking/manage/{token}", new { bookingId = b.Id, start = b.StartUtc, end = b.EndUtc, manageToken = token, manageUrl = $"/booking/{token}" });
         });
 
@@ -373,7 +377,7 @@ public static partial class SchedulingModule
             return Results.Ok(new { appointment = t.Name, start = b.StartUtc, end = b.EndUtc, b.Status, t.TimeZone, publicKey = t.PublicKey, b.AttendeeName });
         });
 
-        g.MapPost("/manage/{token}/cancel", async (string token, CancelIn req, SchedulingDbContext db, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/manage/{token}/cancel", async (string token, CancelIn req, SchedulingDbContext db, IClock clock, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             var b = await ByToken(db, token, ct);
             if (b is null) return Results.NotFound();
@@ -382,11 +386,12 @@ public static partial class SchedulingModule
                 b.Status = BookingStatus.Cancelled; b.CancelledAt = clock.UtcNow; b.CancelReason = req.Reason?[..Math.Min(req.Reason.Length, 500)];
                 await db.SaveChangesAsync(ct);
                 await audit.WriteAsync(new AuditEntry("scheduling.booking.cancelled", "Booking", b.Id.ToString(), b.ProductId, b.AttendeeName, After: new { req.Reason, By = "attendee" }), ct);
+                await events.PublishAsync(new PlatformEvent("booking.cancelled", b.ProductId, "booking", b.Id), ct);
             }
             return Results.NoContent();
         });
 
-        g.MapPost("/manage/{token}/reschedule", async (string token, RescheduleIn req, SchedulingDbContext db, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/manage/{token}/reschedule", async (string token, RescheduleIn req, SchedulingDbContext db, IClock clock, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             var old = await ByToken(db, token, ct);
             if (old is null) return Results.NotFound();
@@ -397,6 +402,8 @@ public static partial class SchedulingModule
             var (b, error) = await PlaceAsync(db, t, req.Start.ToUniversalTime(), template, old, clock.UtcNow, ct);
             if (b is null) return Results.Problem(statusCode: 409, title: error);
             await audit.WriteAsync(new AuditEntry("scheduling.booking.rescheduled", "Booking", b.Id.ToString(), b.ProductId, b.AttendeeName, Before: new { old.StartUtc }, After: new { b.StartUtc }), ct);
+            await events.PublishAsync(new PlatformEvent("booking.cancelled", b.ProductId, "booking", old.Id, new Dictionary<string, string?> { ["reason"] = "rescheduled" }), ct);
+            await events.PublishAsync(new PlatformEvent("booking.created", b.ProductId, "booking", b.Id, new Dictionary<string, string?> { ["rescheduled"] = "true" }), ct);
             return Results.Ok(new { bookingId = b.Id, start = b.StartUtc, end = b.EndUtc, manageToken = newToken, manageUrl = $"/booking/{newToken}" });
         });
     }

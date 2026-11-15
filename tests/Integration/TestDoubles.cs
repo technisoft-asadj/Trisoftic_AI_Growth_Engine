@@ -33,3 +33,20 @@ public sealed class TestJobHandler : IJobHandler
         return Task.CompletedTask;
     }
 }
+
+/// <summary>Stands in for n8n. Calls are recorded; a workflow whose name starts with "flaky" fails the first call of each run, like a brief outage.</summary>
+public sealed class FakeWebhookClient : TriSoftic.GrowthEngine.Modules.Automation.IWebhookClient
+{
+    public static readonly ConcurrentQueue<TriSoftic.GrowthEngine.Modules.Automation.WebhookCall> Calls = new();
+    private static readonly ConcurrentDictionary<Guid, int> Attempts = new();
+
+    public bool IsConfigured(string name) => name == "n8n-test";
+
+    public Task SendAsync(TriSoftic.GrowthEngine.Modules.Automation.WebhookCall call, CancellationToken ct)
+    {
+        var n = Attempts.AddOrUpdate(call.RunId, 1, (_, c) => c + 1);
+        if (call.WorkflowName.StartsWith("flaky") && n == 1) throw new TransientJobException("n8n is down");
+        Calls.Enqueue(call);
+        return Task.CompletedTask;
+    }
+}

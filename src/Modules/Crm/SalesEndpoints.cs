@@ -213,7 +213,7 @@ public static partial class SalesEndpoints
             });
         });
 
-        g.MapPost("/opportunities", async (OppIn req, CrmDbContext db, ICurrentUser u, IUserDirectory dir, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/opportunities", async (OppIn req, CrmDbContext db, ICurrentUser u, IUserDirectory dir, IClock clock, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             if (!u.HasPermission(Permissions.SalesManage) || !await u.CanAccessProductAsync(req.ProductId, ct)) return Results.NotFound();
             var res = await CreateAsync(db, u, dir, req, null, clock.UtcNow, ct);
@@ -221,10 +221,11 @@ public static partial class SalesEndpoints
             var (o, stage) = res.Value;
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry("crm.opportunity.created", "Opportunity", o.Id.ToString(), o.ProductId, o.Name, After: new { o.Value, o.Currency, Stage = stage.Name }), ct);
+            await events.OpportunityAsync("opportunity.created", o, ct);
             return Results.Created($"/api/v1/crm/opportunities/{o.Id}", OppDto(o, stage));
         });
 
-        g.MapPost("/leads/{id:guid}/convert", async (Guid id, ConvertIn req, CrmDbContext db, ICurrentUser u, IUserDirectory dir, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/leads/{id:guid}/convert", async (Guid id, ConvertIn req, CrmDbContext db, ICurrentUser u, IUserDirectory dir, IClock clock, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             if (!u.HasPermission(Permissions.SalesManage)) return Results.NotFound();
             var lead = await db.Leads.FirstOrDefaultAsync(l => l.Id == id, ct);
@@ -243,6 +244,8 @@ public static partial class SalesEndpoints
             db.Interactions.Add(new Interaction { ContactId = lead.ContactId, Type = InteractionType.System, ProductId = lead.ProductId, Summary = $"Lead converted to deal '{o.Name}'", OccurredAt = now, CreatedBy = u.UserId });
             await db.SaveChangesAsync(ct);   // lead + deal + history commit together
             await audit.WriteAsync(new AuditEntry("crm.lead.converted", "Lead", id.ToString(), lead.ProductId, o.Name, After: new { OpportunityId = o.Id, o.Value, o.Currency }), ct);
+            await events.LeadAsync("lead.status-changed", lead, ct, previousStatus: "Qualified");
+            await events.OpportunityAsync("opportunity.created", o, ct);
             return Results.Created($"/api/v1/crm/opportunities/{o.Id}", OppDto(o, stage));
         });
 
@@ -275,7 +278,7 @@ public static partial class SalesEndpoints
             return Results.NoContent();
         });
 
-        g.MapPost("/opportunities/{id:guid}/stage", async (Guid id, MoveIn req, CrmDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/opportunities/{id:guid}/stage", async (Guid id, MoveIn req, CrmDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             var o = await FindOpp(db, u, id, Permissions.SalesManage, ct);
             if (o is null) return Results.NotFound();
@@ -288,10 +291,11 @@ public static partial class SalesEndpoints
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry("crm.opportunity.stage-changed", "Opportunity", id.ToString(), o.ProductId, o.Name,
                 Before: new { Stage = from.Name }, After: new { Stage = to.Name, o.Status, req.Reason, o.RevenueAmount }), ct);
+            await events.OpportunityAsync("opportunity.stage-changed", o, ct, previousStage: from.Name);
             return Results.Ok(OppDto(o, to));
         });
 
-        g.MapPost("/opportunities/{id:guid}/reopen", async (Guid id, ReopenIn req, CrmDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/opportunities/{id:guid}/reopen", async (Guid id, ReopenIn req, CrmDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, IEventPublisher events, CancellationToken ct) =>
         {
             var o = await FindOpp(db, u, id, Permissions.SalesManage, ct);
             if (o is null) return Results.NotFound();
@@ -303,6 +307,7 @@ public static partial class SalesEndpoints
             db.StageChanges.Add(new OpportunityStageChange { OpportunityId = id, FromStageId = from.Id, ToStageId = to.Id, Note = "Reopened", ChangedBy = u.UserId, ChangedAt = now });
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry("crm.opportunity.reopened", "Opportunity", id.ToString(), o.ProductId, o.Name, Before: new { Stage = from.Name }, After: new { Stage = to.Name }), ct);
+            await events.OpportunityAsync("opportunity.stage-changed", o, ct, previousStage: from.Name);
             return Results.Ok(OppDto(o, to));
         });
 
