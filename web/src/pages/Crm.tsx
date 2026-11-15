@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError, type Product } from '../api.ts'
 import { useAuth } from '../auth.tsx'
 import { AppointmentsTab } from './Appointments.tsx'
+import { MessagesTab } from './Messaging.tsx'
 
 // ---------- types mirroring the CRM API ----------
 interface Money { currency: string; value?: number; weighted?: number; revenue?: number }
@@ -81,6 +82,7 @@ export function CrmPage() {
         <NavLink to="/crm/contacts">Contacts</NavLink>
         <NavLink to="/crm/pipeline">Pipeline</NavLink>
         <NavLink to="/crm/appointments">Appointments</NavLink>
+        {can('crm.write') && <NavLink to="/crm/messages">Messages</NavLink>}
         {can('leads.manage') && <NavLink to="/crm/setup">Setup</NavLink>}
       </div>
       <Routes>
@@ -93,6 +95,7 @@ export function CrmPage() {
         <Route path="pipeline" element={<PipelineTab />} />
         <Route path="deals/:id" element={<DealView />} />
         <Route path="appointments" element={<AppointmentsTab />} />
+        <Route path="messages" element={<MessagesTab />} />
         <Route path="setup" element={<SetupTab />} />
       </Routes>
     </>

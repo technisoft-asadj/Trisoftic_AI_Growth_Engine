@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError, type Product } from '../api.ts'
 
 interface Cond { field: string; op: string; value?: string }
-interface Step { kind: string; minutes?: number; field?: string; op?: string; value?: string; title?: string; notes?: string; dueInMinutes?: number; assignee?: string; to?: string; message?: string; name?: string }
+interface Step { kind: string; offsetMinutes?: number; subject?: string; body?: string; purpose?: string; minutes?: number; field?: string; op?: string; value?: string; title?: string; notes?: string; dueInMinutes?: number; assignee?: string; to?: string; message?: string; name?: string }
 interface Def { conditions: Cond[]; steps: Step[] }
 interface WorkflowRow { id: string; name: string; trigger: string; productId?: string; enabled: boolean; currentVersion: number }
 interface Detail { workflow: WorkflowRow; definition: Def; versions: { number: number; note?: string }[] }
@@ -16,7 +16,8 @@ const err = (e: unknown) => {
   return e.violations.length ? `${e.message}: ${e.violations.join('; ')}` : e.message
 }
 const blankStep = (kind: string): Step => ({ wait: { kind, minutes: 60 }, if: { kind, field: 'status', op: 'eq', value: 'New' }, task: { kind, title: '', assignee: 'owner', dueInMinutes: 60 },
-  notify: { kind, message: '', to: 'owner' }, webhook: { kind, name: '' } } as Record<string, Step>)[kind] ?? { kind }
+  notify: { kind, message: '', to: 'owner' }, webhook: { kind, name: '' }, waituntil: { kind, field: 'start', offsetMinutes: -60 },
+  email: { kind, purpose: 'transactional', subject: '', body: '' } } as Record<string, Step>)[kind] ?? { kind }
 
 export function AutomationPage() {
   const catalog = useQuery({ queryKey: ['auto-catalog'], queryFn: () => api.get<Catalog>('/api/v1/automation/triggers') })
@@ -90,6 +91,8 @@ function StepText({ s }: { s: Step }) {
     case 'task': return <>Create task “{s.title}” for {s.assignee ?? 'owner'}{s.dueInMinutes != null && `, due in ${s.dueInMinutes} min`}</>
     case 'notify': return <>Notify {s.to ?? 'owner'}: “{s.message}”</>
     case 'webhook': return <>Call n8n webhook “{s.name}”</>
+    case 'waituntil': return <>Wait until {Math.abs(s.offsetMinutes ?? 0)} min {(s.offsetMinutes ?? 0) < 0 ? 'before' : 'after'} {s.field}</>
+    case 'email': return <>Send a {s.purpose} email “{s.subject}”</>
     default: return <>{s.kind}</>
   }
 }
@@ -172,6 +175,13 @@ function Builder({ catalog, existing, onSaved }: { catalog: Catalog; existing?: 
           {s.kind === 'notify' && <>
             <label>Message<input value={s.message ?? ''} onChange={(e) => setStep(i, { message: e.target.value })} /></label>
             <label>To<input value={s.to ?? 'owner'} onChange={(e) => setStep(i, { to: e.target.value })} /></label></>}
+          {s.kind === 'waituntil' && <>
+            <label>Date field<select value={s.field} onChange={(e) => setStep(i, { field: e.target.value })}>{opts(fields)}</select></label>
+            <label>Minutes (negative = before)<input type="number" value={s.offsetMinutes ?? 0} onChange={(e) => setStep(i, { offsetMinutes: Number(e.target.value) })} /></label></>}
+          {s.kind === 'email' && <>
+            <label>Type<select value={s.purpose} onChange={(e) => setStep(i, { purpose: e.target.value })}><option value="transactional">Relationship (confirmations, reminders)</option><option value="marketing">Marketing (needs recorded consent)</option></select></label>
+            <label>Subject<input value={s.subject ?? ''} onChange={(e) => setStep(i, { subject: e.target.value })} /></label>
+            <label>Message<textarea rows={3} value={s.body ?? ''} onChange={(e) => setStep(i, { body: e.target.value })} /></label></>}
           {s.kind === 'webhook' && <label>Webhook<select value={s.name ?? ''} onChange={(e) => setStep(i, { name: e.target.value })}><option value="">Choose…</option>{opts(catalog.webhooks)}</select></label>}
           <button className="link" onClick={() => setSteps(steps.filter((_, j) => j !== i))}>Remove</button>
         </div>

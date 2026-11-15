@@ -1,5 +1,6 @@
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { ManageBookingPage, PublicBookingPage } from './pages/Booking.tsx'
+import { UnsubscribePage } from './pages/Messaging.tsx'
 import { useAuth } from './auth.tsx'
 import { LoginPage } from './pages/Login.tsx'
 import { ProductsPage } from './pages/Products.tsx'
@@ -18,6 +19,7 @@ export default function App() {
   const summary = useWorkSummary(!!me)
   // Public booking pages work without signing in.
   if (path.startsWith('/book/')) return <Routes><Route path="/book/:key" element={<PublicBookingPage />} /></Routes>
+  if (path.startsWith('/unsubscribe/')) return <Routes><Route path="/unsubscribe/:token" element={<UnsubscribePage />} /></Routes>
   if (path.startsWith('/booking/')) return <Routes><Route path="/booking/:token" element={<ManageBookingPage />} /></Routes>
   if (loading) return <p className="center muted">Loading…</p>
   if (!me) return <LoginPage />
