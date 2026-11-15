@@ -3,6 +3,7 @@ using Serilog.Context;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 using TriSoftic.GrowthEngine.Modules.Ai;
 using TriSoftic.GrowthEngine.Modules.Assets;
+using TriSoftic.GrowthEngine.Modules.Content;
 using TriSoftic.GrowthEngine.Modules.Governance.Persistence;
 using TriSoftic.GrowthEngine.Modules.Identity;
 using TriSoftic.GrowthEngine.Modules.Identity.Persistence;
@@ -75,6 +76,7 @@ public static class ModuleContexts
         typeof(AiDbContext),
         typeof(AssetsDbContext),
         typeof(StrategyDbContext),
+        typeof(ContentDbContext),
     ];
 }
 
@@ -88,6 +90,7 @@ public static class PlatformRegistration
         s.AddAiModule(c);
         s.AddAssetsModule(c);
         s.AddStrategyModule(c);
+        s.AddContentModule(c);
         return s;
     }
 
@@ -98,6 +101,7 @@ public static class PlatformRegistration
         app.MapAiEndpoints();
         app.MapAssetsEndpoints();
         app.MapStrategyEndpoints();
+        app.MapContentEndpoints();
         return app;
     }
 }
