@@ -5,6 +5,8 @@ using TriSoftic.GrowthEngine.Modules.Governance.Persistence;
 using TriSoftic.GrowthEngine.Modules.Identity;
 using TriSoftic.GrowthEngine.Modules.Identity.Persistence;
 using TriSoftic.GrowthEngine.Modules.Jobs;
+using TriSoftic.GrowthEngine.Modules.Portfolio;
+using TriSoftic.GrowthEngine.Modules.Portfolio.Persistence;
 
 namespace TriSoftic.GrowthEngine.Host.Api;
 
@@ -44,6 +46,7 @@ public sealed class DatabaseMigrationHostedService(IServiceProvider sp, IConfigu
                     log.LogInformation("Migrated {Context}", ctxType.Name);
                 }
                 await IdentitySeeder.SeedAsync(sp, ct);
+                await PortfolioModule.SeedAsync(sp, ct);
                 return;
             }
             catch (Exception ex) when (attempt < 10 && !ct.IsCancellationRequested)
@@ -65,6 +68,7 @@ public static class ModuleContexts
         typeof(GovernanceDbContext),
         typeof(IdentityModuleDbContext),
         typeof(JobsDbContext),
+        typeof(PortfolioDbContext),
     ];
 }
 
@@ -74,12 +78,14 @@ public static class PlatformRegistration
     public static IServiceCollection AddPlatformModules(this IServiceCollection s, IConfiguration c)
     {
         s.AddJobsModule(c, runWorker: false);
+        s.AddPortfolioModule(c);
         return s;
     }
 
     public static IEndpointRouteBuilder MapPlatformEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapJobsEndpoints();
+        app.MapPortfolioEndpoints();
         return app;
     }
 }

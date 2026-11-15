@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 using TriSoftic.GrowthEngine.BuildingBlocks.Security;
+using TriSoftic.GrowthEngine.Modules.Governance.Approvals;
 using TriSoftic.GrowthEngine.Modules.Governance.Persistence;
 
 namespace TriSoftic.GrowthEngine.Modules.Governance;
@@ -61,6 +62,7 @@ public static class GovernanceEndpoints
             return Results.Ok(new PauseDto(key, flag.IsPaused, flag.Reason, flag.ChangedAt));
         });
 
+        app.MapApprovalEndpoints();
         return app;
     }
 }
