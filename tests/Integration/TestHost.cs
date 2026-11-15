@@ -30,6 +30,7 @@ public sealed class TestHost : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("ConnectionStrings:Default", _pg.GetConnectionString());
         builder.UseSetting("Database:MigrateOnStartup", "true");
         builder.UseSetting("Storage:Root", Path.Combine(Path.GetTempPath(), "te-test-objects-" + Guid.NewGuid().ToString("N")));
+        builder.UseSetting("Scheduling:LinkSecret", "test-link-secret-0123456789abcdef");
         builder.UseSetting("Bootstrap:AdminEmail", AdminEmail);
         builder.UseSetting("Bootstrap:AdminPassword", AdminPassword);
 

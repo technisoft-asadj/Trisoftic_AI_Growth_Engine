@@ -36,6 +36,11 @@ builder.Services.AddRateLimiter(o =>
     o.AddPolicy(TriSoftic.GrowthEngine.Modules.Crm.CrmModule.PublicFormsPolicy, ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
         $"{ctx.Request.RouteValues["key"]}|{ctx.Connection.RemoteIpAddress}",
         _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions { PermitLimit = formsPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    // Anonymous booking pages: per booking page (or manage token) + client address.
+    var bookingPerMinute = builder.Configuration.GetValue<int?>("RateLimits:PublicBookingPerMinute") ?? 60;
+    o.AddPolicy(TriSoftic.GrowthEngine.Modules.Scheduling.SchedulingModule.PublicPolicy, ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+        $"{ctx.Request.RouteValues["key"] ?? ctx.Request.RouteValues["token"]}|{ctx.Connection.RemoteIpAddress}",
+        _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions { PermitLimit = bookingPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 
 builder.Services.AddHealthChecks()

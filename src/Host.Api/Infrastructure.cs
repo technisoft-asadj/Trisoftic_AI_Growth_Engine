@@ -11,6 +11,7 @@ using TriSoftic.GrowthEngine.Modules.Identity.Persistence;
 using TriSoftic.GrowthEngine.Modules.Jobs;
 using TriSoftic.GrowthEngine.Modules.Portfolio;
 using TriSoftic.GrowthEngine.Modules.Portfolio.Persistence;
+using TriSoftic.GrowthEngine.Modules.Scheduling;
 using TriSoftic.GrowthEngine.Modules.Strategy;
 
 namespace TriSoftic.GrowthEngine.Host.Api;
@@ -80,6 +81,7 @@ public static class ModuleContexts
         typeof(StrategyDbContext),
         typeof(ContentDbContext),
         typeof(CrmDbContext),
+        typeof(SchedulingDbContext),
     ];
 }
 
@@ -95,6 +97,7 @@ public static class PlatformRegistration
         s.AddStrategyModule(c);
         s.AddContentModule(c);
         s.AddCrmModule(c);
+        s.AddSchedulingModule(c);
         return s;
     }
 
@@ -110,6 +113,7 @@ public static class PlatformRegistration
         app.MapLeadEndpoints();
         app.MapSalesEndpoints();
         app.MapDashboardEndpoints();
+        app.MapSchedulingEndpoints();
         return app;
     }
 }
