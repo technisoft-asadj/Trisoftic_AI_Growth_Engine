@@ -4,6 +4,7 @@ using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 using TriSoftic.GrowthEngine.Modules.Ai;
 using TriSoftic.GrowthEngine.Modules.Assets;
 using TriSoftic.GrowthEngine.Modules.Content;
+using TriSoftic.GrowthEngine.Modules.Crm;
 using TriSoftic.GrowthEngine.Modules.Governance.Persistence;
 using TriSoftic.GrowthEngine.Modules.Identity;
 using TriSoftic.GrowthEngine.Modules.Identity.Persistence;
@@ -77,6 +78,7 @@ public static class ModuleContexts
         typeof(AssetsDbContext),
         typeof(StrategyDbContext),
         typeof(ContentDbContext),
+        typeof(CrmDbContext),
     ];
 }
 
@@ -91,6 +93,7 @@ public static class PlatformRegistration
         s.AddAssetsModule(c);
         s.AddStrategyModule(c);
         s.AddContentModule(c);
+        s.AddCrmModule(c);
         return s;
     }
 
@@ -102,6 +105,7 @@ public static class PlatformRegistration
         app.MapAssetsEndpoints();
         app.MapStrategyEndpoints();
         app.MapContentEndpoints();
+        app.MapCrmEndpoints();
         return app;
     }
 }

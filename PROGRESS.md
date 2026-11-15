@@ -29,7 +29,15 @@ Tests: 17 unit + 7 architecture + 35 integration (real Postgres via Testcontaine
 | 2.A2 | Content items with immutable versions, 12 formats, optimistic concurrency, link to saved AI drafts | Done |
 | 2.A3 | Submit -> approve / request changes / reject through the approval engine; approvals are bound to the exact version; editing approved/scheduled/in-review content invalidates earlier approval and withdraws the pending request | Done (state machine unit-tested, flow integration-tested) |
 | 2.A4 | Schedule queue + calendar API and UI (only the approved current version can be scheduled; past times refused) | Done. **Nothing publishes yet**; scheduled items wait for Phase 3 |
-| 2.B1-2.B7 | Consent service, CRM contacts/organizations, leads, pipeline | **Not started** (next) |
+| 2.B1 | Consent: append-only history, evidence required for grants, address-level suppression list, `IContactPolicy` as the single "may we message this person?" gate (also honours the Messaging pause switch and merged contacts) | Done |
+| 2.B2 | Companies, contacts (multiple emails/phones, tags, product/campaign links, interaction timeline), search and segmentation (text, tag, product, campaign, company, source, owner, "has marketing consent on channel"), product-scoped visibility | Done. Saved segments not built (filters are query parameters) |
+| 2.B3 | Duplicate guard (unique normalized email/phone), duplicate suggestions, merge with full history move and tombstone | Done. **No undo** for merges (audited, source row kept as tombstone) |
+| 2.B4 | Lead capture (public form endpoint with honeypot + rate limit + consent text, CSV import with dry-run) | **Next** |
+| 2.B5 | Lead assignment, qualification, configurable score, follow-up dates | Next |
+| 2.B6 | Pipelines, opportunities, stage audit, board | Next |
+| 2.B7 | Lead-to-pipeline dashboard (missing data shown as missing, not zero) | Next |
+
+Note: contacts, consent, leads and pipelines live in one `Crm` module (the plan listed CRM, Lead Management and Sales separately); they share transactions and one visibility rule, so splitting them would only add plumbing.
 
 ## Decisions made on your behalf (override any)
 

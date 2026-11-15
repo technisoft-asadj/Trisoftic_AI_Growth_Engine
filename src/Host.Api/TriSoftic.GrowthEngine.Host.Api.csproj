@@ -20,6 +20,7 @@
     <ProjectReference Include="..\Modules\Assets\TriSoftic.GrowthEngine.Modules.Assets.csproj" />
     <ProjectReference Include="..\Modules\Strategy\TriSoftic.GrowthEngine.Modules.Strategy.csproj" />
     <ProjectReference Include="..\Modules\Content\TriSoftic.GrowthEngine.Modules.Content.csproj" />
+    <ProjectReference Include="..\Modules\Crm\TriSoftic.GrowthEngine.Modules.Crm.csproj" />
   </ItemGroup>
 
   <ItemGroup>

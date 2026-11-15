@@ -19,6 +19,9 @@
   <Folder Name="/src/Modules/Content/">
     <Project Path="src/Modules/Content/TriSoftic.GrowthEngine.Modules.Content.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Crm/">
+    <Project Path="src/Modules/Crm/TriSoftic.GrowthEngine.Modules.Crm.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Governance/">
     <Project Path="src/Modules/Governance/TriSoftic.GrowthEngine.Modules.Governance.csproj" />
   </Folder>

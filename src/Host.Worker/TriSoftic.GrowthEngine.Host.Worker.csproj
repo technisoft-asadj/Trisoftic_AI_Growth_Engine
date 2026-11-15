@@ -16,6 +16,7 @@
     <ProjectReference Include="..\Modules\Portfolio\TriSoftic.GrowthEngine.Modules.Portfolio.csproj" />
     <ProjectReference Include="..\Modules\Jobs\TriSoftic.GrowthEngine.Modules.Jobs.csproj" />
     <ProjectReference Include="..\Modules\Ai\TriSoftic.GrowthEngine.Modules.Ai.csproj" />
+    <ProjectReference Include="..\Modules\Crm\TriSoftic.GrowthEngine.Modules.Crm.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
