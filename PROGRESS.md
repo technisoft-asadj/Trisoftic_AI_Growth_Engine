@@ -34,8 +34,10 @@ Tests: 17 unit + 7 architecture + 35 integration (real Postgres via Testcontaine
 | 2.B3 | Duplicate guard (unique normalized email/phone), duplicate suggestions, merge with full history move and tombstone | Done. **No undo** for merges (audited, source row kept as tombstone) |
 | 2.B4 | Lead capture: anonymous public form (honeypot, 20/min per form+IP rate limit, 32 KB cap, CORS for embedding, exact consent wording stored as evidence), CSV import with dry-run and row-level errors (never assumes consent) | Done |
 | 2.B5 | Round-robin or manual assignment, status workflow with required notes/reasons, configurable explainable score rules, follow-up dates and overdue filter | Done |
-| 2.B6 | Pipelines, opportunities, stage audit, board | Next |
-| 2.B7 | Lead-to-pipeline dashboard (missing data shown as missing, not zero) | Next |
+| 2.B6 | Configurable pipelines (validated: open stages + exactly one Won + one Lost; stages holding deals can't be removed), opportunities with value/currency/probability, lead-to-deal conversion, stage history + audit, ownership audit, reopen, activities/tasks, kanban board that never mixes currencies | Done |
+| 2.B7 | CRM dashboard: lead counts, funnel (created -> contacted -> qualified -> converted -> won), response time, open pipeline value (weighted), win rate, revenue, sales cycle, overdue follow-ups, per-campaign and attributed vs unknown-source. Anything with nothing to measure is `null`, never 0 | Done |
+
+**Phase 2 backend is complete.** Remaining for Phase 2: the CRM web screens (contacts, leads, pipeline board, dashboard). "Influenced" attribution (PRD 5.14) is not modelled; only attributed (lead carries a campaign) vs unknown.
 
 Note: contacts, consent, leads and pipelines live in one `Crm` module (the plan listed CRM, Lead Management and Sales separately); they share transactions and one visibility rule, so splitting them would only add plumbing.
 

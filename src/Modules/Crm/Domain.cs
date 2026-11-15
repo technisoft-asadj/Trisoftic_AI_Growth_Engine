@@ -127,6 +127,11 @@ public sealed class CrmDbContext(DbContextOptions<CrmDbContext> options) : DbCon
     public DbSet<Lead> Leads => Set<Lead>();
     public DbSet<LeadForm> LeadForms => Set<LeadForm>();
     public DbSet<ScoreRule> ScoreRules => Set<ScoreRule>();
+    public DbSet<Pipeline> Pipelines => Set<Pipeline>();
+    public DbSet<PipelineStage> Stages => Set<PipelineStage>();
+    public DbSet<Opportunity> Opportunities => Set<Opportunity>();
+    public DbSet<OpportunityStageChange> StageChanges => Set<OpportunityStageChange>();
+    public DbSet<SalesActivity> Activities => Set<SalesActivity>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -231,6 +236,54 @@ public sealed class CrmDbContext(DbContextOptions<CrmDbContext> options) : DbCon
             e.Property(x => x.Name).HasMaxLength(200).IsRequired();
             e.Property(x => x.Field).HasConversion<string>().HasMaxLength(24);
             e.Property(x => x.Value).HasMaxLength(200);
+        });
+        b.Entity<Pipeline>(e =>
+        {
+            e.ToTable("pipelines"); e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.HasIndex(x => x.ProductId);
+        });
+        b.Entity<PipelineStage>(e =>
+        {
+            e.ToTable("pipeline_stages"); e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(8);
+            e.HasIndex(x => new { x.PipelineId, x.Order });
+            e.HasOne<Pipeline>().WithMany().HasForeignKey(x => x.PipelineId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<Opportunity>(e =>
+        {
+            e.ToTable("opportunities"); e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(300).IsRequired();
+            e.Property(x => x.Value).HasPrecision(18, 2);
+            e.Property(x => x.RevenueAmount).HasPrecision(18, 2);
+            e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(8);
+            e.Property(x => x.Source).HasMaxLength(200);
+            e.Property(x => x.NextStep).HasMaxLength(500);
+            e.Property(x => x.WonLostReason).HasMaxLength(1000);
+            e.HasIndex(x => new { x.PipelineId, x.StageId });
+            e.HasIndex(x => new { x.ProductId, x.Status });
+            e.HasIndex(x => x.OwnerUserId);
+            e.HasIndex(x => x.LeadId);
+            e.HasOne<Contact>().WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<PipelineStage>().WithMany().HasForeignKey(x => x.StageId).OnDelete(DeleteBehavior.Restrict);
+        });
+        b.Entity<OpportunityStageChange>(e =>
+        {
+            e.ToTable("opportunity_stage_changes"); e.HasKey(x => x.Id);
+            e.Property(x => x.Note).HasMaxLength(1000);
+            e.HasIndex(x => new { x.OpportunityId, x.ChangedAt });
+            e.HasOne<Opportunity>().WithMany().HasForeignKey(x => x.OpportunityId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<SalesActivity>(e =>
+        {
+            e.ToTable("sales_activities"); e.HasKey(x => x.Id);
+            e.Property(x => x.Type).HasConversion<string>().HasMaxLength(8);
+            e.Property(x => x.Summary).HasMaxLength(2000).IsRequired();
+            e.HasIndex(x => new { x.OpportunityId, x.CreatedAt });
+            e.HasIndex(x => x.DueAt);
+            e.HasOne<Opportunity>().WithMany().HasForeignKey(x => x.OpportunityId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<Suppression>(e =>
         {

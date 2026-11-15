@@ -52,6 +52,7 @@ public sealed class DatabaseMigrationHostedService(IServiceProvider sp, IConfigu
                 }
                 await IdentitySeeder.SeedAsync(sp, ct);
                 await PortfolioModule.SeedAsync(sp, ct);
+                await CrmModule.SeedAsync(sp, ct);
                 return;
             }
             catch (Exception ex) when (attempt < 10 && !ct.IsCancellationRequested)
@@ -107,6 +108,8 @@ public static class PlatformRegistration
         app.MapContentEndpoints();
         app.MapCrmEndpoints();
         app.MapLeadEndpoints();
+        app.MapSalesEndpoints();
+        app.MapDashboardEndpoints();
         return app;
     }
 }

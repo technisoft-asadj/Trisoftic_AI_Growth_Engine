@@ -19,4 +19,10 @@ public static class CrmModule
         s.AddCors(o => o.AddPolicy(PublicFormsPolicy, p => p.AllowAnyOrigin().WithMethods("POST").WithHeaders("Content-Type")));
         return s;
     }
+
+    public static async Task SeedAsync(IServiceProvider sp, CancellationToken ct = default)
+    {
+        using var scope = sp.CreateScope();
+        await SalesEndpoints.SeedAsync(scope.ServiceProvider.GetRequiredService<CrmDbContext>(), ct);
+    }
 }
