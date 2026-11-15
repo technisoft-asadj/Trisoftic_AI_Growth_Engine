@@ -18,6 +18,7 @@
     <ProjectReference Include="..\Modules\Jobs\TriSoftic.GrowthEngine.Modules.Jobs.csproj" />
     <ProjectReference Include="..\Modules\Ai\TriSoftic.GrowthEngine.Modules.Ai.csproj" />
     <ProjectReference Include="..\Modules\Assets\TriSoftic.GrowthEngine.Modules.Assets.csproj" />
+    <ProjectReference Include="..\Modules\Strategy\TriSoftic.GrowthEngine.Modules.Strategy.csproj" />
   </ItemGroup>
 
   <ItemGroup>

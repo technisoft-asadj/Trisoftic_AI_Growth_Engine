@@ -19,6 +19,8 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => 
 builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddScoped<ICorrelationContext, CorrelationContext>();
 builder.Services.AddProblemDetails();
+// Malformed request bodies must answer 400 in every environment (Development defaults to throwing, which surfaced as 500).
+builder.Services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(o => o.ThrowOnBadRequest = false);
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddOpenApi();
 

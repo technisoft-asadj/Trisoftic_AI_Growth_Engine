@@ -16,7 +16,7 @@ Last updated: 2026-11-15 (overnight autonomous run). Source of truth for scope/o
 | 1.8 | Approval engine: version-bound, permission + product scope + four-eyes, idempotent subject handlers | Done |
 | 1.9 | AI abstraction: Claude (official SDK) + OpenAI (HTTP), usage ledger, per-product/global monthly budget, redaction, pause | Done, **not run against real providers** |
 | 1.10 | Grounded generation: approved+verified facts only, claims must cite `factRef` or be assumptions, prohibited-claim and invented-figure checks, 1 repair retry | Done (tested with a scripted fake provider) |
-| 1.11 | Strategy workspace (persisting briefs, hypotheses, versions) | **Not started** (generation endpoint exists; persistence/UI do not) |
+| 1.11 | Strategy workspace: B2C-gaming / B2B-software / blank templates, immutable versions with optimistic concurrency, link to saved AI drafts; every AI generation is now saved server-side as a draft with provenance | Done (backend tested, UI built). Strategy approval is deferred to the Campaign work in Phase 2 |
 | 1.12 | React shell (login, products, profile editor + submit, assets upload/list, approvals inbox, AI studio, admin: pause/jobs/audit) | Built, type-checks, lints, production build OK. **Never opened in a browser** (no browser available overnight). Smoke-tested the API it calls against the real dev DB |
 
 Tests: 17 unit + 7 architecture + 35 integration (real Postgres via Testcontainers), all passing at the last run. Reproduce: `dotnet test`.
@@ -33,7 +33,9 @@ Tests: 17 unit + 7 architecture + 35 integration (real Postgres via Testcontaine
 
 ## Not verified / known gaps (be honest about these)
 
-- **No real LLM call has ever been made** (no API keys on this machine). Prompt quality, the Anthropic SDK call and the OpenAI HTTP call are untested against the live APIs. First thing to do: set `Ai__Anthropic__ApiKey` and hit `POST /api/v1/products/{id}/ai/generate` once.
+- **AI via Amazon Bedrock is verified live** (Converse API, `us.anthropic.claude-sonnet-4-6` / `opus-4-6`, dev account, us-east-1): a full flow with a demo product (profile -> approval -> grounded draft) produced a correct, grounded post that ignored the unverified fact and both prohibited claims; ~1.5 cents, 2 attempts. Enable with `Ai__DefaultProvider=Bedrock` and `Ai__Bedrock__Region=us-east-1`. The 5.x Claude models are listed on Bedrock but **not enabled for this AWS account** (AccessDenied) until model access is granted in the console.
+- The direct Anthropic API provider (`Ai__Anthropic__ApiKey`) and the OpenAI provider have **not** been run against the live APIs.
+- PowerShell `Get-Content`/`Set-Content` corrupts non-ASCII characters in this repo (it did once, repaired). Edit source files with the editor tools or `sed`, not those cmdlets.
 - The grounding validator catches structural violations, prohibited text and invented numbers. It cannot catch a fluent but unsupported qualitative claim ("the fastest POS"). Human approval remains the backstop.
 - Prod deployment files (compose for API/worker/n8n/Caddy), S3 storage, backups, and the CI workflow have never been executed in CI.
 - Cookie `Secure` policy is `SameAsRequest`; behind TLS proxy it must be forced to Always (forwarded headers are configured).

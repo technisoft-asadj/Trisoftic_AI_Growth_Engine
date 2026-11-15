@@ -63,6 +63,8 @@ export interface AuditItem { id: string; occurredAt: string; actorEmail?: string
 export interface JobItem { id: string; type: string; status: string; attempts: number; maxAttempts: number; lastError?: string; runAt: string }
 export interface PauseItem { scope: string; isPaused: boolean; reason?: string }
 export interface Grounded {
+  draftId: string
   draft: { title: string; body: string; claims: { text: string; factRef?: string; assumption: boolean }[]; questions: string[] }
   profileVersion: number; provider: string; model: string; costUsd: number; attempts: number
 }
+

@@ -179,6 +179,34 @@ public sealed class AiTests(TestHost host)
     }
 
     [Fact]
+    public async Task Generations_are_saved_with_server_side_provenance_and_can_seed_a_strategy()
+    {
+        var admin = await host.LoginAdminAsync();
+        var pid = await ProductWithApprovedProfileAsync(admin);
+        var other = await ProductWithApprovedProfileAsync(admin);
+        Script(Good);
+        var gen = await (await Generate(admin, pid, kind: "StrategyBrief")).Content.ReadFromJsonAsync<JsonElement>(Json);
+        var draftId = gen.GetProperty("draftId").GetGuid();
+
+        var d = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/ai/drafts/{draftId}", Json);
+        Assert.Equal("StrategyBrief", d.GetProperty("kind").GetString());
+        Assert.Equal("claude-opus-5-5", d.GetProperty("model").GetString());       // Strategy tier model, recorded by the server
+        Assert.Equal(1, d.GetProperty("claims").GetArrayLength());
+        Assert.Equal(1, (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/products/{pid}/ai/drafts", Json)).GetArrayLength());
+
+        // adopting the draft links it as provenance and copies the body into the strategy notes
+        var create = await admin.PostAsJsonAsync($"/api/v1/products/{pid}/strategies", new { name = "From AI", templateKey = "b2b-software", sourceDraftId = draftId });
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+        var sid = (await create.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var s = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/strategies/{sid}", Json);
+        Assert.Contains("works offline", s.GetProperty("current").GetProperty("notes").GetString());
+        Assert.Equal(draftId, s.GetProperty("versions")[0].GetProperty("sourceDraftId").GetGuid());
+
+        // a draft from another product cannot be adopted
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync($"/api/v1/products/{other}/strategies", new { name = "Steal", sourceDraftId = draftId })).StatusCode);
+    }
+
+    [Fact]
     public async Task Permissions_are_enforced()
     {
         var admin = await host.LoginAdminAsync();

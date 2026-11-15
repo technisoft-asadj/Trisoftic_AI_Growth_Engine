@@ -28,6 +28,9 @@
   <Folder Name="/src/Modules/Portfolio/">
     <Project Path="src/Modules/Portfolio/TriSoftic.GrowthEngine.Modules.Portfolio.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Strategy/">
+    <Project Path="src/Modules/Strategy/TriSoftic.GrowthEngine.Modules.Strategy.csproj" />
+  </Folder>
   <Folder Name="/tests/" />
   <Folder Name="/tests/Architecture/">
     <Project Path="tests/Architecture/TriSoftic.GrowthEngine.Tests.Architecture.csproj" />

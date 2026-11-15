@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using NetArchTest.Rules;
 
 namespace TriSoftic.GrowthEngine.Tests.Architecture;
@@ -13,6 +13,8 @@ public sealed class ModuleBoundaryTests
         typeof(TriSoftic.GrowthEngine.Modules.Portfolio.PortfolioModule).Assembly,
         typeof(TriSoftic.GrowthEngine.Modules.Jobs.JobsModule).Assembly,
         typeof(TriSoftic.GrowthEngine.Modules.Ai.AiModule).Assembly,
+        typeof(TriSoftic.GrowthEngine.Modules.Assets.AssetsModule).Assembly,
+        typeof(TriSoftic.GrowthEngine.Modules.Strategy.StrategyModule).Assembly,
     ];
 
     private static string ModuleName(Assembly a) => a.GetName().Name!.Split('.').Last();
@@ -49,3 +51,4 @@ public sealed class ModuleBoundaryTests
         }
     }
 }
+

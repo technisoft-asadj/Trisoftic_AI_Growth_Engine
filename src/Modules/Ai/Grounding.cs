@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
@@ -71,7 +72,7 @@ public static partial class GroundingValidator
 
     public static string Normalize(string s) => Whitespace().Replace(s.ToLowerInvariant(), " ").Trim();
     private static string CleanNumber(string s) => s.Replace(",", "").Trim('.', ' ');
-    private static string Short(string s) => s.Length <= 80 ? s : s[..80] + "â€¦";
+    private static string Short(string s) => s.Length <= 80 ? s : s[..80] + "...";
 
     [GeneratedRegex(@"\d[\d,\.]*\d%?|\d%?")]
     private static partial Regex Numbers();
@@ -79,7 +80,7 @@ public static partial class GroundingValidator
     private static partial Regex Whitespace();
 }
 
-public sealed class GroundedGenerator(IProductKnowledge knowledge, IAiGenerator ai)
+public sealed class GroundedGenerator(IProductKnowledge knowledge, IAiGenerator ai, Microsoft.Extensions.Logging.ILogger<GroundedGenerator> log)
 {
     public const int MaxAttempts = 2;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
@@ -109,9 +110,11 @@ public sealed class GroundedGenerator(IProductKnowledge knowledge, IAiGenerator 
             cost += last.EstimatedCostUsd;
 
             var draft = ParseDraft(last.Text, out var parseError);
+            if (draft is null) log.LogWarning("Grounding attempt {Attempt} unparseable: {Error}", attempt, parseError);
             if (draft is null) { violations = [parseError!]; continue; }
 
             violations = GroundingValidator.Validate(draft, k, req.Brief);
+            if (violations.Count > 0) log.LogWarning("Grounding attempt {Attempt} for {Template} violated: {Violations}", attempt, templateKey, string.Join(" | ", violations));
             if (violations.Count == 0)
                 return new GroundedOutput(draft, k.ProfileVersion, last.Provider, last.Model, cost, attempt, templateKey, templateVersion);
         }

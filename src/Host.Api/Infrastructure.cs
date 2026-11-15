@@ -9,6 +9,7 @@ using TriSoftic.GrowthEngine.Modules.Identity.Persistence;
 using TriSoftic.GrowthEngine.Modules.Jobs;
 using TriSoftic.GrowthEngine.Modules.Portfolio;
 using TriSoftic.GrowthEngine.Modules.Portfolio.Persistence;
+using TriSoftic.GrowthEngine.Modules.Strategy;
 
 namespace TriSoftic.GrowthEngine.Host.Api;
 
@@ -73,6 +74,7 @@ public static class ModuleContexts
         typeof(PortfolioDbContext),
         typeof(AiDbContext),
         typeof(AssetsDbContext),
+        typeof(StrategyDbContext),
     ];
 }
 
@@ -85,6 +87,7 @@ public static class PlatformRegistration
         s.AddPortfolioModule(c);
         s.AddAiModule(c);
         s.AddAssetsModule(c);
+        s.AddStrategyModule(c);
         return s;
     }
 
@@ -94,7 +97,9 @@ public static class PlatformRegistration
         app.MapPortfolioEndpoints();
         app.MapAiEndpoints();
         app.MapAssetsEndpoints();
+        app.MapStrategyEndpoints();
         return app;
     }
 }
+
 

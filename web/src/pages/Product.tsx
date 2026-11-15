@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { NavLink, Navigate, Route, Routes, useParams } from 'react-router-dom'
+import { Link, NavLink, Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError, type AssetItem, type Fact, type Claim, type Grounded, type Product, type Profile, type ProfileVersion } from '../api.ts'
 import { useAuth } from '../auth.tsx'
+import { StrategiesTab } from './Strategies.tsx'
 
 const emptyProfile = (): Profile => ({ summary: '', facts: [], claims: [], markets: [], platforms: [], personas: [], brandVoice: { dos: [], donts: [] }, links: [], competitors: [] })
 const lines = (t: string) => t.split('\n').map((s) => s.trim()).filter(Boolean)
@@ -32,16 +33,23 @@ export function ProductPage() {
       <nav className="tabs">
         <NavLink to="profile">Profile</NavLink>
         {can('assets.read') && <NavLink to="assets">Assets</NavLink>}
+        {can('products.read') && <NavLink to="strategies">Strategies</NavLink>}
         {can('ai.generate') && <NavLink to="generate">AI studio</NavLink>}
       </nav>
       <Routes>
         <Route index element={<Navigate to="profile" replace />} />
         <Route path="profile" element={<ProfileTab productId={p.id} />} />
         <Route path="assets" element={<AssetsTab productId={p.id} />} />
+        <Route path="strategies" element={<StrategiesRoute productId={p.id} />} />
         <Route path="generate" element={<GenerateTab product={p} />} />
       </Routes>
     </>
   )
+}
+
+function StrategiesRoute({ productId }: { productId: string }) {
+  const [params, setParams] = useSearchParams()
+  return <StrategiesTab productId={productId} draftToAdopt={params.get('draft')} onAdopted={() => setParams({})} />
 }
 
 // ---------------- Profile ----------------
@@ -241,7 +249,8 @@ function GenerateTab({ product }: { product: Product }) {
           <h3>Claims &amp; sources</h3>
           <ul>{d.draft.claims.map((c, i) => <li key={i}>{c.text} — {c.assumption ? <span className="badge warn">assumption</span> : <code>{c.factRef}</code>}</li>)}</ul>
           {d.draft.questions.length > 0 && (<><h3>The AI needs more information</h3><ul>{d.draft.questions.map((q) => <li key={q}>{q}</li>)}</ul></>)}
-          <p className="muted">Based on profile v{d.profileVersion} · {d.provider}/{d.model} · ${d.costUsd.toFixed(4)} · {d.attempts} attempt(s). Drafts are not saved or published; a human must review them.</p>
+          <p><Link to={`../strategies?draft=${d.draftId}`}>Create a strategy from this draft →</Link></p>
+          <p className="muted">Based on profile v{d.profileVersion} · {d.provider}/{d.model} · ${d.costUsd.toFixed(4)} · {d.attempts} attempt(s). Saved as an AI draft; nothing is published, and a human must review it.</p>
         </div>
       )}
     </>
