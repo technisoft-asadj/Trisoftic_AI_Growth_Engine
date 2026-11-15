@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <UserSecretsId>dotnet-TriSoftic.GrowthEngine.Host.Worker-84f41d27-ce8d-4efa-af8e-53c17a84d8cd</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Serilog.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BuildingBlocks\TriSoftic.GrowthEngine.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\Modules\Governance\TriSoftic.GrowthEngine.Modules.Governance.csproj" />
+    <ProjectReference Include="..\Modules\Identity\TriSoftic.GrowthEngine.Modules.Identity.csproj" />
+    <ProjectReference Include="..\Modules\Portfolio\TriSoftic.GrowthEngine.Modules.Portfolio.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
+  </ItemGroup>
+</Project>
+
+

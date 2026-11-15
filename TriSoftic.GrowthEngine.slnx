@@ -1,0 +1,32 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/BuildingBlocks/">
+    <Project Path="src/BuildingBlocks/TriSoftic.GrowthEngine.BuildingBlocks.csproj" />
+  </Folder>
+  <Folder Name="/src/Host.Api/">
+    <Project Path="src/Host.Api/TriSoftic.GrowthEngine.Host.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Host.Worker/">
+    <Project Path="src/Host.Worker/TriSoftic.GrowthEngine.Host.Worker.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/Governance/">
+    <Project Path="src/Modules/Governance/TriSoftic.GrowthEngine.Modules.Governance.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Identity/">
+    <Project Path="src/Modules/Identity/TriSoftic.GrowthEngine.Modules.Identity.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Portfolio/">
+    <Project Path="src/Modules/Portfolio/TriSoftic.GrowthEngine.Modules.Portfolio.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/Architecture/">
+    <Project Path="tests/Architecture/TriSoftic.GrowthEngine.Tests.Architecture.csproj" />
+  </Folder>
+  <Folder Name="/tests/Integration/">
+    <Project Path="tests/Integration/TriSoftic.GrowthEngine.Tests.Integration.csproj" />
+  </Folder>
+  <Folder Name="/tests/Unit/">
+    <Project Path="tests/Unit/TriSoftic.GrowthEngine.Tests.Unit.csproj" />
+  </Folder>
+</Solution>
