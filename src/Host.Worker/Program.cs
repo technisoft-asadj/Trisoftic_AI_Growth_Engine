@@ -6,6 +6,7 @@ using TriSoftic.GrowthEngine.Modules.Content;
 using TriSoftic.GrowthEngine.Modules.Crm;
 using TriSoftic.GrowthEngine.Modules.Publishing;
 using TriSoftic.GrowthEngine.Modules.Governance;
+using TriSoftic.GrowthEngine.Modules.Messaging;
 using TriSoftic.GrowthEngine.Modules.Scheduling;
 using TriSoftic.GrowthEngine.Modules.Jobs;
 
@@ -26,6 +27,7 @@ builder.Services.AddSchedulingModule(builder.Configuration);
 builder.Services.AddAutomationModule(builder.Configuration, runScheduler: true);
 builder.Services.AddContentModule(builder.Configuration);
 builder.Services.AddPublishingModule(builder.Configuration, runScheduler: true);
+builder.Services.AddMessagingModule(builder.Configuration);
 // Job handlers (AI generation, publishing, imports, reminders...) register here as their modules are added.
 
 await builder.Build().RunAsync();

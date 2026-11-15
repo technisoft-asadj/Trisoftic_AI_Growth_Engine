@@ -14,6 +14,8 @@ public static class CrmModule
     {
         s.AddModuleDbContext<CrmDbContext>(c, CrmDbContext.Schema);
         s.AddScoped<IContactPolicy, ContactPolicy>();
+        s.AddScoped<IAddressPolicy, AddressPolicy>();
+        s.AddScoped<IOptOutService, OptOutService>();
         s.AddScoped<ISubjectStateProvider, LeadStateProvider>();
         s.AddScoped<ISubjectStateProvider, OpportunityStateProvider>();
 

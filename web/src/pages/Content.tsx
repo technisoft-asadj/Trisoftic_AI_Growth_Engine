@@ -8,7 +8,7 @@ interface ItemSummary { id: string; productId: string; campaignId?: string; titl
 interface ItemDetail { item: ItemSummary; current: { number: number; title: string; body: string; note?: string; sourceDraftId?: string }; versions: { number: number; note?: string; approved: boolean; createdAt: string }[] }
 interface Campaign { id: string; name: string; objective: string; status: string; budgetUsd?: number; startDate?: string; endDate?: string; channels: string }
 
-const statusClass = (s: string) => (s === 'Approved' || s === 'Scheduled' ? 'badge ok' : s === 'Rejected' || s === 'Cancelled' ? 'badge warn' : 'badge')
+const statusClass = (s: string) => (['Approved', 'Scheduled', 'Published'].includes(s) ? 'badge ok' : ['Rejected', 'Cancelled', 'PublishFailed'].includes(s) ? 'badge warn' : 'badge')
 
 function Err({ e }: { e: unknown }) {
   if (!(e instanceof ApiError)) return null
@@ -97,6 +97,9 @@ function EditorBody({ d, onBack }: { d: ItemDetail; onBack: () => void }) {
       {it.status === 'Scheduled' && <p>Scheduled for <strong>{new Date(it.scheduledFor!).toLocaleString()}</strong>. Editing will cancel the schedule and require a new approval.</p>}
       {it.status === 'Approved' && <p className="muted">Approved as v{it.approvedVersion}. Editing creates a new version that needs approval again.</p>}
       {it.status === 'InReview' && <p className="muted">Waiting for approval. Editing will withdraw the request.</p>}
+      {it.status === 'Publishing' && <p className="muted">Being published now. It can be edited once publishing finishes.</p>}
+      {it.status === 'Published' && <p className="muted">Live. Editing creates a new version that needs approval before it can go out.</p>}
+      {it.status === 'PublishFailed' && <p className="error">Publishing failed. See Publishing, Needs attention, to retry or record it by hand.</p>}
       <form className="card" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate() }}>
         <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} disabled={!canWrite} /></label>
         <label>Text<textarea rows={12} value={body} onChange={(e) => setBody(e.target.value)} disabled={!canWrite} /></label>

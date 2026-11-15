@@ -10,6 +10,7 @@ import { CalendarPage } from './pages/Content.tsx'
 import { CrmPage } from './pages/Crm.tsx'
 import { InboxPage, useWorkSummary } from './pages/Inbox.tsx'
 import { AutomationPage } from './pages/Automation.tsx'
+import { ConnectPage, PublishingPage } from './pages/Publishing.tsx'
 
 export default function App() {
   const { me, loading, can, logout } = useAuth()
@@ -30,6 +31,7 @@ export default function App() {
           <NavLink to="/calendar">Calendar</NavLink>
           {can('crm.read') && <NavLink to="/crm">CRM</NavLink>}
           <NavLink to="/inbox">Inbox{!!summary.data?.unreadNotifications && <span className="badge warn"> {summary.data.unreadNotifications}</span>}{!!summary.data?.overdueTasks && <span className="badge warn"> {summary.data.overdueTasks} overdue</span>}</NavLink>
+          {can('publishing.manage') && <NavLink to="/publishing">Publishing</NavLink>}
           {can('automation.manage') && <NavLink to="/automation">Automation</NavLink>}
           <NavLink to="/approvals">Approvals</NavLink>
           {(can('audit.read') || can('jobs.manage') || can('governance.pause')) && <NavLink to="/admin">Admin</NavLink>}
@@ -46,6 +48,8 @@ export default function App() {
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/crm/*" element={<CrmPage />} />
           <Route path="/inbox" element={<InboxPage />} />
+          <Route path="/publishing" element={<PublishingPage />} />
+          <Route path="/publishing/connect" element={<ConnectPage />} />
           <Route path="/automation" element={<AutomationPage />} />
           <Route path="/approvals"element={<ApprovalsPage />} />
           <Route path="/admin" element={<AdminPage />} />

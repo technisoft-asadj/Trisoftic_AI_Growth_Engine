@@ -36,6 +36,10 @@ builder.Services.AddRateLimiter(o =>
     o.AddPolicy(TriSoftic.GrowthEngine.Modules.Crm.CrmModule.PublicFormsPolicy, ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
         $"{ctx.Request.RouteValues["key"]}|{ctx.Connection.RemoteIpAddress}",
         _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions { PermitLimit = formsPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    // Anonymous unsubscribe links: per client address.
+    o.AddPolicy(TriSoftic.GrowthEngine.Modules.Messaging.MessagingModule.PublicPolicy, ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+        $"unsub|{ctx.Connection.RemoteIpAddress}",
+        _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     // Anonymous booking pages: per booking page (or manage token) + client address.
     var bookingPerMinute = builder.Configuration.GetValue<int?>("RateLimits:PublicBookingPerMinute") ?? 60;
     o.AddPolicy(TriSoftic.GrowthEngine.Modules.Scheduling.SchedulingModule.PublicPolicy, ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(

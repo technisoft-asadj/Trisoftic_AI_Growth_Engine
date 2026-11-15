@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
+using TriSoftic.GrowthEngine.BuildingBlocks.Security;
 using TriSoftic.GrowthEngine.Modules.Automation;
 using TriSoftic.GrowthEngine.Modules.Jobs;
 

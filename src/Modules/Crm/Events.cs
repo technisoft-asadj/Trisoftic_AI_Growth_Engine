@@ -16,7 +16,7 @@ public sealed class LeadStateProvider(CrmDbContext db) : ISubjectStateProvider
         return new Dictionary<string, object?>
         {
             ["status"] = l.Status.ToString(), ["source"] = l.Source, ["score"] = l.Score, ["ownerUserId"] = l.OwnerUserId, ["campaignId"] = l.CampaignId,
-            ["contactName"] = name, ["nextAction"] = l.NextAction,
+            ["contactName"] = name, ["nextAction"] = l.NextAction, ["contactId"] = l.ContactId,
         };
     }
 }
@@ -34,7 +34,7 @@ public sealed class OpportunityStateProvider(CrmDbContext db) : ISubjectStatePro
         return new Dictionary<string, object?>
         {
             ["name"] = o.Name, ["status"] = o.Status.ToString(), ["stage"] = stage.Name, ["stageKind"] = stage.Kind.ToString(), ["value"] = o.Value, ["currency"] = o.Currency,
-            ["ownerUserId"] = o.OwnerUserId, ["contactName"] = name,
+            ["ownerUserId"] = o.OwnerUserId, ["contactName"] = name, ["contactId"] = o.ContactId,
         };
     }
 }

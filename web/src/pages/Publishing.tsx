@@ -1,0 +1,169 @@
+import { useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api, ApiError, type Product } from '../api.ts'
+
+interface Account { id: string; provider: string; channel: string; displayName: string; status: string; lastError?: string; lastCheckedAt?: string }
+interface Caps { facebookConfigured: boolean; sandboxEnabled: boolean }
+interface Failure { itemId: string; productId: string; channel: string; title: string; version: number; reason?: string; updatedAt: string; attempts: { number: number; status: string; error?: string; startedAt: string }[] }
+interface Post { contentItemId: string; version: number; providerPostId: string; url?: string; source: string; note?: string; publishedAt: string }
+
+const err = (e: unknown) => (e instanceof ApiError ? e.message : e ? 'Something went wrong' : null)
+
+export function PublishingPage() {
+  const [tab, setTab] = useState<'failed' | 'channels' | 'posts'>('failed')
+  return (
+    <>
+      <h1>Publishing</h1>
+      <p className="muted">Approved posts go out at their scheduled time. A post is only marked Published once the network confirms it.</p>
+      <div className="tabs">
+        {(['failed', 'channels', 'posts'] as const).map((t) => <button key={t} className={t === tab ? 'active link' : 'link'} onClick={() => setTab(t)}>{{ failed: 'Needs attention', channels: 'Channels', posts: 'Published' }[t]}</button>)}
+      </div>
+      {tab === 'failed' && <Failures />}
+      {tab === 'channels' && <Channels />}
+      {tab === 'posts' && <Posts />}
+    </>
+  )
+}
+
+function Failures() {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['pub-failures'], queryFn: () => api.get<Failure[]>('/api/v1/publishing/failures'), refetchInterval: 30_000 })
+  const refresh = () => { void qc.invalidateQueries({ queryKey: ['pub-failures'] }); void qc.invalidateQueries({ queryKey: ['calendar'] }) }
+  const retry = useMutation({ mutationFn: (f: Failure) => api.post(`/api/v1/publishing/content/${f.itemId}/retry`, { version: f.version }), onSuccess: refresh })
+  const abandon = useMutation({ mutationFn: (f: Failure) => api.post(`/api/v1/publishing/content/${f.itemId}/abandon`, { version: f.version }), onSuccess: refresh })
+  const manual = useMutation({
+    mutationFn: (v: { f: Failure; url: string; note: string }) => api.post(`/api/v1/publishing/content/${v.f.itemId}/mark-published`, { version: v.f.version, url: v.url, note: v.note || null }),
+    onSuccess: refresh,
+  })
+  const [urls, setUrls] = useState<Record<string, string>>({}); const [notes, setNotes] = useState<Record<string, string>>({})
+  return (
+    <>
+      {q.data?.length === 0 && <p className="muted">Nothing needs attention.</p>}
+      {err(q.error ?? retry.error ?? abandon.error ?? manual.error) && <p className="error" role="alert">{err(q.error ?? retry.error ?? abandon.error ?? manual.error)}</p>}
+      {q.data?.map((f) => (
+        <div className="card" key={f.itemId}>
+          <strong>{f.title}</strong> <span className="muted">· {f.channel} · v{f.version} · {new Date(f.updatedAt).toLocaleString()}</span>
+          <p className="error">{f.reason}</p>
+          {f.attempts.length > 0 && <ul className="muted">{f.attempts.map((a) => <li key={a.number}>Attempt {a.number}: {a.status}{a.error && ` · ${a.error}`}</li>)}</ul>}
+          <div className="row">
+            <button disabled={retry.isPending} onClick={() => retry.mutate(f)}>Retry</button>
+            <button className="secondary" onClick={() => abandon.mutate(f)}>Stop trying (keep approved)</button>
+            <Link to="/calendar">Open content</Link>
+          </div>
+          <div className="row">
+            <label>It is already live: link to the post<input placeholder="https://…" value={urls[f.itemId] ?? ''} onChange={(e) => setUrls({ ...urls, [f.itemId]: e.target.value })} /></label>
+            <label>Note<input value={notes[f.itemId] ?? ''} onChange={(e) => setNotes({ ...notes, [f.itemId]: e.target.value })} /></label>
+            <button className="secondary" disabled={!urls[f.itemId]} onClick={() => manual.mutate({ f, url: urls[f.itemId], note: notes[f.itemId] ?? '' })}>Mark as published</button>
+          </div>
+        </div>
+      ))}
+    </>
+  )
+}
+
+function useProductChoice() {
+  const products = useQuery({ queryKey: ['products'], queryFn: () => api.get<Product[]>('/api/v1/products') })
+  const [chosen, setChosen] = useState('')
+  const pid = chosen || products.data?.find((p) => !p.isArchived)?.id || ''
+  const select = (
+    <label>Product
+      <select value={pid} onChange={(e) => setChosen(e.target.value)}>{products.data?.filter((p) => !p.isArchived).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+    </label>
+  )
+  return { pid, select }
+}
+
+function Channels() {
+  const qc = useQueryClient()
+  const { pid, select } = useProductChoice()
+  const caps = useQuery({ queryKey: ['pub-caps'], queryFn: () => api.get<Caps>('/api/v1/publishing/capabilities') })
+  const accounts = useQuery({ queryKey: ['pub-accounts', pid], enabled: !!pid, queryFn: () => api.get<Account[]>(`/api/v1/publishing/products/${pid}/accounts`) })
+  const [channel, setChannel] = useState('facebook')
+  const refresh = () => void qc.invalidateQueries({ queryKey: ['pub-accounts', pid] })
+  const sandbox = useMutation({ mutationFn: () => api.post(`/api/v1/publishing/products/${pid}/accounts/sandbox`, { channel, name: 'Sandbox page' }), onSuccess: refresh })
+  const disconnect = useMutation({ mutationFn: (id: string) => api.post(`/api/v1/publishing/accounts/${id}/disconnect`), onSuccess: refresh })
+  const startFb = useMutation({
+    mutationFn: () => api.get<{ url: string }>(`/api/v1/publishing/connect/facebook/start?productId=${pid}&channel=${encodeURIComponent(channel)}`),
+    onSuccess: (r) => { window.location.href = r.url },
+  })
+  return (
+    <>
+      <div className="row">{select}</div>
+      <div className="card">
+        <h2>Connected accounts</h2>
+        {accounts.data?.length === 0 && <p className="muted">No account is connected for this product, so scheduled posts will fail with a clear message.</p>}
+        {!!accounts.data?.length && (
+          <table>
+            <thead><tr><th>Channel</th><th>Account</th><th>Network</th><th>Status</th><th /></tr></thead>
+            <tbody>{accounts.data.map((a) => (
+              <tr key={a.id}><td>{a.channel}</td><td>{a.displayName}</td><td>{a.provider}</td>
+                <td><span className={a.status === 'Connected' ? 'badge ok' : 'badge warn'}>{a.status === 'NeedsReconnect' ? 'Needs reconnecting' : a.status}</span>{a.lastError && <div className="muted">{a.lastError}</div>}</td>
+                <td><button className="link" onClick={() => disconnect.mutate(a.id)}>Disconnect</button></td></tr>
+            ))}</tbody>
+          </table>
+        )}
+        {err(accounts.error ?? disconnect.error) && <p className="error" role="alert">{err(accounts.error ?? disconnect.error)}</p>}
+      </div>
+      <div className="card">
+        <h2>Connect an account</h2>
+        <p className="muted">The channel name must match the channel you pick on content items (for example “facebook”). Connecting a new account replaces the old one for that channel.</p>
+        <div className="row">
+          <label>Channel name<input value={channel} onChange={(e) => setChannel(e.target.value)} /></label>
+          <button disabled={!caps.data?.facebookConfigured || !channel.trim() || startFb.isPending} onClick={() => startFb.mutate()}>Connect a Facebook Page</button>
+          {caps.data?.sandboxEnabled && <button className="secondary" disabled={!channel.trim() || sandbox.isPending} onClick={() => sandbox.mutate()}>Connect sandbox (no real posting)</button>}
+        </div>
+        {caps.data && !caps.data.facebookConfigured && <p className="muted">Facebook is not set up on this server yet: it needs a Meta developer app (App ID, App Secret and the redirect address in the server settings). Pages can only be posted to by people who have a role on the page, and Meta’s app review is needed before anyone else can connect.</p>}
+        {err(sandbox.error ?? startFb.error) && <p className="error" role="alert">{err(sandbox.error ?? startFb.error)}</p>}
+      </div>
+    </>
+  )
+}
+
+function Posts() {
+  const { pid, select } = useProductChoice()
+  const q = useQuery({ queryKey: ['pub-posts', pid], enabled: !!pid, queryFn: () => api.get<Post[]>(`/api/v1/publishing/products/${pid}/posts`) })
+  return (
+    <>
+      <div className="row">{select}</div>
+      {q.data?.length === 0 && <p className="muted">Nothing published yet.</p>}
+      {!!q.data?.length && (
+        <table>
+          <thead><tr><th>When</th><th>Post</th><th>Recorded</th></tr></thead>
+          <tbody>{q.data.map((p) => (
+            <tr key={p.contentItemId + p.version}><td>{new Date(p.publishedAt).toLocaleString()}</td>
+              <td>{p.url ? <a href={p.url} target="_blank" rel="noreferrer">{p.providerPostId}</a> : p.providerPostId}</td>
+              <td>{p.source === 'Manual' ? <span className="badge warn">By hand{p.note && `: ${p.note}`}</span> : <span className="badge ok">Confirmed by the network</span>}</td></tr>
+          ))}</tbody>
+        </table>
+      )}
+    </>
+  )
+}
+
+/** Where Facebook sends the browser back to: choose which page to connect. */
+export function ConnectPage() {
+  const [sp] = useSearchParams(); const nav = useNavigate()
+  const pending = sp.get('pending'); const error = sp.get('error')
+  const pages = useQuery({ queryKey: ['pub-pending', pending], enabled: !!pending, retry: false, queryFn: () => api.get<{ id: string; name: string }[]>(`/api/v1/publishing/connect/pending/${pending}`) })
+  const pick = useMutation({ mutationFn: (pageId: string) => api.post(`/api/v1/publishing/connect/pending/${pending}/select`, { pageId }), onSuccess: () => nav('/publishing') })
+  const reasons: Record<string, string> = {
+    denied: 'Facebook did not give permission, so nothing was connected.', expired: 'That connection attempt expired. Please start again.',
+    nopages: 'That Facebook account does not manage any Pages.', facebook: 'Facebook could not complete the connection. Please try again.',
+  }
+  return (
+    <>
+      <h1>Connect a Facebook Page</h1>
+      {error && <p className="error" role="alert">{reasons[error] ?? 'The connection failed.'}</p>}
+      {pending && pages.isError && <p className="error" role="alert">This connection link is no longer valid.</p>}
+      {pages.data && (
+        <div className="card">
+          <p>Choose the Page this product should post to:</p>
+          {pages.data.map((p) => <div className="row" key={p.id}><strong>{p.name}</strong><button disabled={pick.isPending} onClick={() => pick.mutate(p.id)}>Use this Page</button></div>)}
+          {err(pick.error) && <p className="error" role="alert">{err(pick.error)}</p>}
+        </div>
+      )}
+      <p><Link to="/publishing">Back to publishing</Link></p>
+    </>
+  )
+}

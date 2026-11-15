@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
+using TriSoftic.GrowthEngine.BuildingBlocks.Security;
 
 namespace TriSoftic.GrowthEngine.Modules.Automation;
 
@@ -55,7 +57,7 @@ public sealed class WebhookClient(IHttpClientFactory http, IConfiguration cfg, I
     }
 }
 
-public sealed class WorkflowEngine(AutomationDbContext db, IEnumerable<ISubjectStateProvider> providers, IJobQueue jobs, IClock clock, IWebhookClient hooks)
+public sealed class WorkflowEngine(AutomationDbContext db, IEnumerable<ISubjectStateProvider> providers, IJobQueue jobs, IClock clock, IWebhookClient hooks, IMessageOutbox? outbox = null)
 {
     public const string ResumeJob = "automation.resume";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -148,6 +150,23 @@ public sealed class WorkflowEngine(AutomationDbContext db, IEnumerable<ISubjectS
                         await EnqueueResume(run.Id, run.NextStep, run.ResumeAt.Value, run.ProductId, ct);
                         return;
 
+                    case "waituntil":
+                    {
+                        // e.g. "one day before the booking starts": the target comes from a date on the record, so reminders follow a rescheduled time.
+                        if (!ctx.TryGetValue(s.Field!, out var raw) || !DateTimeOffset.TryParse(Convert.ToString(raw, CultureInfo.InvariantCulture), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var stamp))
+                            throw new PermanentJobException($"'{s.Field}' is not a date on this record");
+                        var target = stamp.AddMinutes(s.OffsetMinutes ?? 0); var now = clock.UtcNow;
+                        if (target <= now) { Log(run, i, "waituntil", LogStatus.Skipped, $"{s.Field} {s.OffsetMinutes:+#;-#;0} min was {target:u}, already passed; continuing"); break; }
+                        if (target - now > TimeSpan.FromDays(Definitions.MaxWaitUntilDays)) throw new PermanentJobException($"{s.Field} is more than {Definitions.MaxWaitUntilDays} days away");
+                        run.NextStep = i + 1; run.Status = RunStatus.Waiting; run.ResumeAt = target; run.UpdatedAt = now;
+                        Log(run, i, "waituntil", LogStatus.Waiting, $"Waiting until {target:u}");
+                        await db.SaveChangesAsync(ct);
+                        await EnqueueResume(run.Id, run.NextStep, target, run.ProductId, ct);
+                        return;
+                    }
+
+                    case "email": await DoEmail(run, i, s, ctx, ct); break;
+
                     case "if":
                         if (!Definitions.Matches(ctx, s.Field!, s.Op!, s.Value))
                         {
@@ -227,6 +246,24 @@ public sealed class WorkflowEngine(AutomationDbContext db, IEnumerable<ISubjectS
         db.Tasks.Add(task);
         if (assignee is { } uid) db.Notifications.Add(new Notification { UserId = uid, Title = "New task: " + task.Title, Link = LinkFor(run.SubjectType, run.SubjectId), RunId = run.Id, StepIndex = i, CreatedAt = now });
         Log(run, i, "task", LogStatus.Succeeded, $"Created task '{task.Title}'");
+    }
+
+    private async Task DoEmail(WorkflowRun run, int i, Step s, Dictionary<string, object?> ctx, CancellationToken ct)
+    {
+        if (outbox is null) throw new PermanentJobException("Email is not set up on this server");
+        var purpose = s.Purpose == "marketing" ? ContactPurpose.Marketing : ContactPurpose.Transactional;
+        Guid? contactId = ctx.TryGetValue("contactId", out var c) && Guid.TryParse(Convert.ToString(c), out var cid) ? cid : null;
+        var address = ctx.TryGetValue("attendeeEmail", out var a) ? Convert.ToString(a) : null;
+        if (purpose == ContactPurpose.Marketing && contactId is null) { Log(run, i, "email", LogStatus.Skipped, "A marketing email needs a contact with recorded consent; this record has none"); return; }
+        if (contactId is null && string.IsNullOrWhiteSpace(address)) { Log(run, i, "email", LogStatus.Skipped, "No contact or email address on this record"); return; }
+        try
+        {
+            var q = await outbox.QueueEmailAsync(new EmailRequest(purpose, Definitions.Render(s.Subject!, ctx, 300), Definitions.Render(s.Body!, ctx, 20_000), $"wf:{run.Id}:{i}",
+                contactId, contactId is null ? address : null, run.ProductId, run.SubjectType, run.SubjectId), ct);
+            // The consent gate is applied again at the moment of sending, so the message may still end up Blocked (see Messages).
+            Log(run, i, "email", LogStatus.Succeeded, q.AlreadyQueued ? "Email was already queued by an earlier attempt" : $"Queued {purpose.ToString().ToLowerInvariant()} email; consent is checked again when it is sent");
+        }
+        catch (ArgumentException ex) { throw new PermanentJobException(ex.Message); }
     }
 
     private async Task DoNotify(WorkflowRun run, int i, Step s, Dictionary<string, object?> ctx, CancellationToken ct)

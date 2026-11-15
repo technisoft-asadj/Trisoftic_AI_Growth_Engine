@@ -32,6 +32,10 @@ public sealed class TestHost : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("Storage:Root", Path.Combine(Path.GetTempPath(), "te-test-objects-" + Guid.NewGuid().ToString("N")));
         builder.UseSetting("Scheduling:LinkSecret", "test-link-secret-0123456789abcdef");
         builder.UseSetting("Publishing:AllowSandbox", "true");
+        builder.UseSetting("Messaging:PublicBaseUrl", "https://app.test");
+        builder.UseSetting("Messaging:LinkSecret", "test-unsubscribe-secret-0123456789");
+        builder.UseSetting("Messaging:FooterText", "TriSoftic Test Ltd, 1 Test Street, Lahore");
+        builder.UseSetting("Messaging:Webhooks:ses-test:Secret", "ses-test-shared-secret");
         builder.UseSetting("Automation:Webhooks:n8n-test:Url", "http://localhost:1/never-called");
         builder.UseSetting("Automation:Webhooks:n8n-test:Secret", "n8n-test-shared-secret");
         builder.UseSetting("Bootstrap:AdminEmail", AdminEmail);
@@ -43,6 +47,8 @@ public sealed class TestHost : WebApplicationFactory<Program>, IAsyncLifetime
             s.AddSingleton<FakeClock>();
             s.AddSingleton<IClock>(sp => sp.GetRequiredService<FakeClock>());
             s.AddScoped<IJobHandler, TestJobHandler>();
+            s.RemoveAll<TriSoftic.GrowthEngine.Modules.Messaging.IEmailProvider>();
+            s.AddScoped<TriSoftic.GrowthEngine.Modules.Messaging.IEmailProvider, FakeEmailProvider>();
             s.RemoveAll<TriSoftic.GrowthEngine.Modules.Publishing.IChannelPublisher>();
             s.AddScoped<TriSoftic.GrowthEngine.Modules.Publishing.IChannelPublisher, ScriptedPublisher>();
             s.RemoveAll<TriSoftic.GrowthEngine.Modules.Publishing.IFacebookGraph>();

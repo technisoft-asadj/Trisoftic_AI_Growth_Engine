@@ -8,8 +8,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
-using TriSoftic.GrowthEngine.BuildingBlocks.Persistence;
 using TriSoftic.GrowthEngine.BuildingBlocks.Security;
+using TriSoftic.GrowthEngine.BuildingBlocks.Persistence;
 
 namespace TriSoftic.GrowthEngine.Modules.Automation;
 
@@ -53,11 +53,11 @@ public static partial class AutomationModule
     // ---------- workflows ----------
     private static void MapWorkflows(RouteGroupBuilder g)
     {
-        g.MapGet("/triggers", (ICurrentUser u, IWebhookClient hooks, IConfiguration cfg) => u.HasPermission(Permissions.AutomationManage)
+        g.MapGet("/triggers", (ICurrentUser u, IWebhookClient hooks, IConfiguration cfg, IMessageOutbox? outbox) => u.HasPermission(Permissions.AutomationManage)
             ? Results.Ok(new
             {
                 triggers = Definitions.Triggers.Select(t => new { type = t.Key, fields = t.Value }),
-                externalPrefix = "external.", stepKinds = Definitions.StepKinds.Where(k => k != "email"), ops = Definitions.Ops,
+                externalPrefix = "external.", stepKinds = Definitions.StepKinds.Where(k => k != "email" || outbox is not null), ops = Definitions.Ops,
                 webhooks = (cfg.GetSection("Automation:Webhooks").GetChildren().Select(x => x.Key)).Where(hooks.IsConfigured),
             })
             : Results.Forbid());
@@ -84,12 +84,12 @@ public static partial class AutomationModule
             });
         });
 
-        g.MapPost("/workflows", async (WorkflowIn req, AutomationDbContext db, ICurrentUser u, IWebhookClient hooks, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/workflows", async (WorkflowIn req, AutomationDbContext db, ICurrentUser u, IWebhookClient hooks, IClock clock, IAuditWriter audit, IMessageOutbox? outbox, CancellationToken ct) =>
         {
             if (!u.HasPermission(Permissions.AutomationManage) || !await CanUseScopeAsync(u, req.ProductId, ct)) return Results.NotFound();
             if (string.IsNullOrWhiteSpace(req.Name) || req.Name.Length > 200) return Results.Problem(statusCode: 400, title: "A name is required");
             if (!Definitions.IsKnownTrigger(req.Trigger ?? "")) return Results.Problem(statusCode: 400, title: "Unknown trigger");
-            var errors = Definitions.Validate(req.Definition ?? new(), hooks.IsConfigured, emailAvailable: false);
+            var errors = Definitions.Validate(req.Definition ?? new(), hooks.IsConfigured, emailAvailable: outbox is not null);
             if (errors.Count > 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["definition"] = [.. errors] });
 
             var now = clock.UtcNow;
@@ -102,12 +102,12 @@ public static partial class AutomationModule
         });
 
         // A change is a new immutable version; runs already in flight keep the version they started with.
-        g.MapPut("/workflows/{id:guid}", async (Guid id, WorkflowUpdate req, AutomationDbContext db, ICurrentUser u, IWebhookClient hooks, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPut("/workflows/{id:guid}", async (Guid id, WorkflowUpdate req, AutomationDbContext db, ICurrentUser u, IWebhookClient hooks, IClock clock, IAuditWriter audit, IMessageOutbox? outbox, CancellationToken ct) =>
         {
             var w = await db.Workflows.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (w is null || !u.HasPermission(Permissions.AutomationManage) || !await CanUseScopeAsync(u, w.ProductId, ct)) return Results.NotFound();
             if (req.BaseVersion != w.CurrentVersion) return Results.Problem(statusCode: 409, title: $"Someone saved version {w.CurrentVersion} meanwhile; reload and re-apply your change");
-            var errors = Definitions.Validate(req.Definition ?? new(), hooks.IsConfigured, emailAvailable: false);
+            var errors = Definitions.Validate(req.Definition ?? new(), hooks.IsConfigured, emailAvailable: outbox is not null);
             if (errors.Count > 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["definition"] = [.. errors] });
             var now = clock.UtcNow;
             w.CurrentVersion++; w.UpdatedAt = now; if (!string.IsNullOrWhiteSpace(req.Name)) w.Name = req.Name.Trim();

@@ -10,6 +10,7 @@ using TriSoftic.GrowthEngine.Modules.Governance.Persistence;
 using TriSoftic.GrowthEngine.Modules.Identity;
 using TriSoftic.GrowthEngine.Modules.Identity.Persistence;
 using TriSoftic.GrowthEngine.Modules.Jobs;
+using TriSoftic.GrowthEngine.Modules.Messaging;
 using TriSoftic.GrowthEngine.Modules.Portfolio;
 using TriSoftic.GrowthEngine.Modules.Portfolio.Persistence;
 using TriSoftic.GrowthEngine.Modules.Publishing;
@@ -86,6 +87,7 @@ public static class ModuleContexts
         typeof(SchedulingDbContext),
         typeof(AutomationDbContext),
         typeof(PublishingDbContext),
+        typeof(MessagingDbContext),
     ];
 }
 
@@ -104,6 +106,7 @@ public static class PlatformRegistration
         s.AddSchedulingModule(c);
         s.AddAutomationModule(c, runScheduler: false);   // the worker host runs the sweep scheduler
         s.AddPublishingModule(c, runScheduler: false);   // ...and the publishing dispatcher
+        s.AddMessagingModule(c);
         return s;
     }
 
@@ -122,6 +125,7 @@ public static class PlatformRegistration
         app.MapSchedulingEndpoints();
         app.MapAutomationEndpoints();
         app.MapPublishingEndpoints();
+        app.MapMessagingEndpoints();
         return app;
     }
 }

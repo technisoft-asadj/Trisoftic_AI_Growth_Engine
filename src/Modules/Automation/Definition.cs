@@ -30,6 +30,12 @@ public sealed class Step
     public string? To { get; set; }
     public string? Message { get; set; }
     public string? Name { get; set; }
+    /// <summary>waituntil: minutes added to the timestamp field (negative = before it), e.g. -1440 for one day before a booking.</summary>
+    public int? OffsetMinutes { get; set; }
+    /// <summary>email: subject and body (placeholders allowed) and "marketing" or "transactional".</summary>
+    public string? Subject { get; set; }
+    public string? Body { get; set; }
+    public string? Purpose { get; set; }
 }
 
 public sealed class WorkflowDefinition
@@ -46,14 +52,16 @@ public sealed class WorkflowDefinition
 public static partial class Definitions
 {
     public static readonly string[] Ops = ["eq", "ne", "gt", "lt", "contains", "exists", "empty"];
-    public static readonly string[] StepKinds = ["wait", "if", "task", "notify", "webhook", "email"];
+    public static readonly string[] StepKinds = ["wait", "waituntil", "if", "task", "notify", "webhook", "email"];
+    /// <summary>The furthest ahead a "wait until" may reach.</summary>
+    public const int MaxWaitUntilDays = 90;
     public const int MaxSteps = 20;
     public const int MaxWaitMinutes = 60 * 24 * 30;
 
     /// <summary>Events workflows may start from, with the facts each record offers for conditions and templates.</summary>
     public static readonly IReadOnlyDictionary<string, string[]> Triggers = new Dictionary<string, string[]>
     {
-        ["lead.created"] = ["status", "source", "score", "ownerUserId", "campaignId", "contactName", "nextAction"],
+        ["lead.created"] = ["status", "source", "score", "ownerUserId", "campaignId", "contactName", "nextAction", "contactId"],
         ["lead.assigned"] = ["status", "source", "score", "ownerUserId", "campaignId", "contactName"],
         ["lead.status-changed"] = ["status", "previousStatus", "source", "score", "ownerUserId", "contactName"],
         ["opportunity.created"] = ["name", "status", "stage", "stageKind", "value", "currency", "ownerUserId", "contactName"],
@@ -101,8 +109,15 @@ public static partial class Definitions
                 case "webhook":
                     if (string.IsNullOrWhiteSpace(s.Name) || !webhookExists(s.Name)) errors.Add($"{at}: webhook '{s.Name}' is not configured");
                     break;
+                case "waituntil":
+                    if (string.IsNullOrWhiteSpace(s.Field)) errors.Add($"{at}: choose the date field to wait for");
+                    if (s.OffsetMinutes is < -(60 * 24 * MaxWaitUntilDays) or > 60 * 24 * MaxWaitUntilDays) errors.Add($"{at}: offset is out of range");
+                    break;
                 case "email":
-                    if (!emailAvailable) errors.Add($"{at}: sending email is not available yet");
+                    if (!emailAvailable) errors.Add($"{at}: sending email is not set up on this server");
+                    if (string.IsNullOrWhiteSpace(s.Subject) || s.Subject.Length > 300) errors.Add($"{at}: a subject is required");
+                    if (string.IsNullOrWhiteSpace(s.Body) || s.Body.Length > 20_000) errors.Add($"{at}: a body is required");
+                    if (s.Purpose is not ("marketing" or "transactional")) errors.Add($"{at}: purpose must be 'marketing' or 'transactional'");
                     break;
             }
         }
@@ -148,27 +163,4 @@ public static partial class Definitions
         var s = Token().Replace(template, m => ctx.TryGetValue(m.Groups[1].Value, out var v) && v is not null ? Convert.ToString(v, CultureInfo.InvariantCulture) ?? "" : "");
         return s.Length <= max ? s : s[..max];
     }
-}
-
-/// <summary>HMAC signing for webhooks in both directions (n8n and any other automation tool).</summary>
-public static class WebhookSigner
-{
-    public static readonly TimeSpan Tolerance = TimeSpan.FromMinutes(5);
-
-    public static string Sign(string secret, long unixSeconds, string body)
-    {
-        var mac = HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes($"{unixSeconds}.{body}"));
-        return "sha256=" + Convert.ToHexString(mac).ToLowerInvariant();
-    }
-
-    /// <summary>True when the signature matches and the timestamp is within five minutes either way. Replay inside that window is stopped by the receipt table.</summary>
-    public static bool Verify(string secret, string? timestamp, string body, string? signature, DateTimeOffset now)
-    {
-        if (string.IsNullOrEmpty(secret) || string.IsNullOrEmpty(signature) || !long.TryParse(timestamp, out var ts)) return false;
-        var age = now - DateTimeOffset.FromUnixTimeSeconds(ts);
-        if (age > Tolerance || age < -Tolerance) return false;
-        return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(Sign(secret, ts, body)), Encoding.UTF8.GetBytes(signature));
-    }
-
-    public static string Hash(string signature) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signature))).ToLowerInvariant();
 }

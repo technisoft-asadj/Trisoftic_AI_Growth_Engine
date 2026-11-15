@@ -103,3 +103,14 @@ public sealed class FakeFacebookGraph : TriSoftic.GrowthEngine.Modules.Publishin
     public Task<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageInfo>> ListPagesAsync(string userToken, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageInfo>>([new("111", "Ludo Fight Official", "page-secret-token-111"), new("222", "Other Page", "page-secret-token-222")]);
 }
+
+/// <summary>Captures outgoing email instead of sending it.</summary>
+public sealed class FakeEmailProvider : TriSoftic.GrowthEngine.Modules.Messaging.IEmailProvider
+{
+    public static readonly ConcurrentQueue<TriSoftic.GrowthEngine.Modules.Messaging.OutgoingEmail> Sent = new();
+    public static volatile bool Configured = true;
+    public bool IsConfigured => Configured;
+    public string From => "growth@test.local";
+    public Task<string> SendAsync(TriSoftic.GrowthEngine.Modules.Messaging.OutgoingEmail message, CancellationToken ct) { Sent.Enqueue(message); return Task.FromResult("msg-" + Guid.NewGuid().ToString("N")[..8]); }
+    public static List<TriSoftic.GrowthEngine.Modules.Messaging.OutgoingEmail> To(string address) => Sent.Where(m => m.To.Equals(address, StringComparison.OrdinalIgnoreCase)).ToList();
+}

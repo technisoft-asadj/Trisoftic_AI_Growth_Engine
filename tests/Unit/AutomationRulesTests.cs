@@ -1,3 +1,4 @@
+using TriSoftic.GrowthEngine.BuildingBlocks.Security;
 using TriSoftic.GrowthEngine.Modules.Automation;
 
 namespace TriSoftic.GrowthEngine.Tests.Unit;
