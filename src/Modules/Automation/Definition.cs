@@ -69,6 +69,7 @@ public static partial class Definitions
         ["booking.created"] = ["status", "attendeeName", "attendeeEmail", "start", "ownerUserId", "leadId"],
         ["booking.cancelled"] = ["status", "attendeeName", "attendeeEmail", "start", "ownerUserId", "leadId"],
         ["analytics.source-stale"] = ["name", "kind", "hoursSinceUpdate", "freshnessHours"],
+        ["budget.threshold-crossed"] = ["name", "currency", "cap", "spent", "committed", "spentPct", "level", "status", "ownerUserId"],
     };
 
     public static bool IsKnownTrigger(string t) => Triggers.ContainsKey(t) || ExternalTrigger().IsMatch(t);

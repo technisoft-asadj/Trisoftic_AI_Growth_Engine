@@ -31,6 +31,7 @@
     <ProjectReference Include="..\..\src\Modules\Publishing\TriSoftic.GrowthEngine.Modules.Publishing.csproj" />
     <ProjectReference Include="..\..\src\Modules\Messaging\TriSoftic.GrowthEngine.Modules.Messaging.csproj" />
     <ProjectReference Include="..\..\src\Modules\Analytics\TriSoftic.GrowthEngine.Modules.Analytics.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Budget\TriSoftic.GrowthEngine.Modules.Budget.csproj" />
   </ItemGroup>
 
 </Project>

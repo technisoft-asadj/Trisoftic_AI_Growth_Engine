@@ -5,6 +5,7 @@ using TriSoftic.GrowthEngine.Modules.Ai;
 using TriSoftic.GrowthEngine.Modules.Analytics;
 using TriSoftic.GrowthEngine.Modules.Assets;
 using TriSoftic.GrowthEngine.Modules.Automation;
+using TriSoftic.GrowthEngine.Modules.Budget;
 using TriSoftic.GrowthEngine.Modules.Content;
 using TriSoftic.GrowthEngine.Modules.Crm;
 using TriSoftic.GrowthEngine.Modules.Governance.Persistence;
@@ -91,6 +92,7 @@ public static class ModuleContexts
         typeof(PublishingDbContext),
         typeof(MessagingDbContext),
         typeof(AnalyticsDbContext),
+        typeof(BudgetDbContext),
     ];
 }
 
@@ -111,6 +113,7 @@ public static class PlatformRegistration
         s.AddPublishingModule(c, runScheduler: false);   // ...and the publishing dispatcher
         s.AddMessagingModule(c);
         s.AddAnalyticsModule(c, runScheduler: false);
+        s.AddBudgetModule(c);
         return s;
     }
 
@@ -131,6 +134,7 @@ public static class PlatformRegistration
         app.MapPublishingEndpoints();
         app.MapMessagingEndpoints();
         app.MapAnalyticsEndpoints();
+        app.MapBudgetEndpoints();
         return app;
     }
 }
