@@ -17,7 +17,7 @@ Last updated: 2026-11-15 (overnight autonomous run). Source of truth for scope/o
 | 1.9 | AI abstraction: Claude (official SDK) + OpenAI (HTTP), usage ledger, per-product/global monthly budget, redaction, pause | Done, **not run against real providers** |
 | 1.10 | Grounded generation: approved+verified facts only, claims must cite `factRef` or be assumptions, prohibited-claim and invented-figure checks, 1 repair retry | Done (tested with a scripted fake provider) |
 | 1.11 | Strategy workspace (persisting briefs, hypotheses, versions) | **Not started** (generation endpoint exists; persistence/UI do not) |
-| 1.12 | React shell | See bottom of this file |
+| 1.12 | React shell (login, products, profile editor + submit, assets upload/list, approvals inbox, AI studio, admin: pause/jobs/audit) | Built, type-checks, lints, production build OK. **Never opened in a browser** (no browser available overnight). Smoke-tested the API it calls against the real dev DB |
 
 Tests: 17 unit + 7 architecture + 35 integration (real Postgres via Testcontainers), all passing at the last run. Reproduce: `dotnet test`.
 
@@ -46,8 +46,13 @@ Tests: 17 unit + 7 architecture + 35 integration (real Postgres via Testcontaine
 docker compose -f infra/docker-compose.dev.yml up -d      # Postgres on :5433
 dotnet run --project src/Host.Api                         # http://localhost:5232, migrates + seeds on start
 dotnet run --project src/Host.Worker                      # job runner
+cd web && npm install && npm run dev                      # http://localhost:5173, proxies /api to :5232
 dotnet test
 ```
+
+Sign in at the web app with `admin@trisoftic.local` / `DevOnly-ChangeMe-123!` (dev only). Then: create a product, start a profile, add at least one verified fact with evidence, submit it, and approve it with a **second** user (create one in the API: `POST /api/v1/users` with role `Approver`; there is no user-management screen yet) — or set `Governance__AllowSelfApproval=true` for a solo trial.
+
+Known UI gaps: no user-management screen, no strategy save/versioning, drafts from the AI studio are display-only (not persisted until the Content module exists).
 
 Secrets via env vars, e.g. `Ai__Anthropic__ApiKey`, `Ai__OpenAi__ApiKey` + `Ai__OpenAi__Models__Draft`.
 
