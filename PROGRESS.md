@@ -39,6 +39,12 @@ Tests: 17 unit + 7 architecture + 35 integration (real Postgres via Testcontaine
 
 | 2.B8 | CRM web screens (`web/src/pages/Crm.tsx`, nav "CRM"): dashboard (null shown as "—"), leads list/filters/detail (qualify, disqualify, next action, rescore, convert), contacts search + consent recording + timeline, pipeline board + deal page (move, win/lose with reason, reopen, activities, history), setup (lead forms with endpoint URL, CSV import with preview, score rules) | Built; type-checks, lints, builds. **Never opened in a browser.** Missing: create contact/company form, merge UI, deal edit, pipeline editor, drag-and-drop |
 
+### Phase 3
+
+| WP | What | Status |
+|---|---|---|
+| 3.4-3.6 | Scheduling module (`src/Modules/Scheduling`): appointment types (duration, buffers, step, notice, window, IANA zone, staff list), weekly hours + closed dates, DST-safe slot generation (pure, unit-tested), **DB exclusion constraint** (btree_gist, per staff, buffers included) so concurrent bookings cannot overlap (test: 50 racing requests -> exactly 1 booking), idempotency keys, anonymous public booking API (rate limited, staff identities never exposed), secret-token reschedule/cancel links (only a hash is stored), HMAC-signed lead links so only staff-minted links attach a booking to a lead. Web: public `/book/:key`, `/booking/:token`, staff "Appointments" tab | Done. Uses permission `appointments.manage`. Needs `Scheduling:LinkSecret` in prod. **Not yet:** anonymous bookings do not create a CRM lead/contact; no confirmation or reminder emails (3.10/3.11); web never opened in a browser |
+
 **Phase 2 is complete** apart from the UI gaps listed on 2.B8. "Influenced" attribution (PRD 5.14) is not modelled; only attributed (lead carries a campaign) vs unknown.
 
 Note: contacts, consent, leads and pipelines live in one `Crm` module (the plan listed CRM, Lead Management and Sales separately); they share transactions and one visibility rule, so splitting them would only add plumbing.

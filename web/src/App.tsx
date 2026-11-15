@@ -1,4 +1,5 @@
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { ManageBookingPage, PublicBookingPage } from './pages/Booking.tsx'
 import { useAuth } from './auth.tsx'
 import { LoginPage } from './pages/Login.tsx'
 import { ProductsPage } from './pages/Products.tsx'
@@ -10,6 +11,10 @@ import { CrmPage } from './pages/Crm.tsx'
 
 export default function App() {
   const { me, loading, can, logout } = useAuth()
+  const path = useLocation().pathname
+  // Public booking pages work without signing in.
+  if (path.startsWith('/book/')) return <Routes><Route path="/book/:key" element={<PublicBookingPage />} /></Routes>
+  if (path.startsWith('/booking/')) return <Routes><Route path="/booking/:token" element={<ManageBookingPage />} /></Routes>
   if (loading) return <p className="center muted">Loading…</p>
   if (!me) return <LoginPage />
 
