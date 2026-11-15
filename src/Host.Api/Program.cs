@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.HttpOverrides;
+﻿using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Serilog;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
@@ -14,6 +14,8 @@ builder.Host.UseSerilog((ctx, sp, cfg) => cfg
     .Enrich.FromLogContext()
     .WriteTo.Console(new Serilog.Formatting.Compact.RenderedCompactJsonFormatter()));
 
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 210L * 1024 * 1024);
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.MultipartBodyLengthLimit = 210L * 1024 * 1024);
 builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddScoped<ICorrelationContext, CorrelationContext>();
 builder.Services.AddProblemDetails();
@@ -52,3 +54,4 @@ app.MapPlatformEndpoints();
 await app.RunAsync();
 
 public partial class Program;
+

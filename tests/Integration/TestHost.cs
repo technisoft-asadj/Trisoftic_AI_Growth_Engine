@@ -29,6 +29,7 @@ public sealed class TestHost : WebApplicationFactory<Program>, IAsyncLifetime
         // UseSetting feeds host configuration, which minimal-hosting Program.cs reads eagerly.
         builder.UseSetting("ConnectionStrings:Default", _pg.GetConnectionString());
         builder.UseSetting("Database:MigrateOnStartup", "true");
+        builder.UseSetting("Storage:Root", Path.Combine(Path.GetTempPath(), "te-test-objects-" + Guid.NewGuid().ToString("N")));
         builder.UseSetting("Bootstrap:AdminEmail", AdminEmail);
         builder.UseSetting("Bootstrap:AdminPassword", AdminPassword);
 
