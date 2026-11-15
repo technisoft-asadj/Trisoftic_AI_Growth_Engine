@@ -19,6 +19,7 @@ public static class AiModule
         s.Configure<AiOptions>(c.GetSection("Ai"));
         s.AddHttpClient("openai", h => h.Timeout = TimeSpan.FromMinutes(5));
         s.AddSingleton<IAiProvider, AnthropicProvider>();
+        s.AddSingleton<IAiProvider, AnthropicBedrockProvider>();
         s.AddScoped<IAiProvider, OpenAiProvider>();
         s.AddScoped<IAiGenerator, AiGenerator>();
         s.AddScoped<GroundedGenerator>();

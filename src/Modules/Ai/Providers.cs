@@ -60,6 +60,49 @@ public sealed class AnthropicProvider(IOptions<AiOptions> options) : IAiProvider
     }
 }
 
+/// <summary>
+/// Claude on Amazon Bedrock through the Converse API. No Anthropic key: authentication is the standard AWS credential chain
+/// (env, shared profile, or the IAM role of the host). Use cross-region inference profile ids such as
+/// "us.anthropic.claude-sonnet-4-6"; which Claude models are usable depends on the AWS account's model access.
+/// </summary>
+public sealed class AnthropicBedrockProvider(IOptions<AiOptions> options) : IAiProvider
+{
+    private Amazon.BedrockRuntime.AmazonBedrockRuntimeClient? _client;
+    public string Name => "Bedrock";
+    public bool IsConfigured => options.Value.Bedrock.BedrockEnabled;
+    public string? ModelFor(AiTier tier) => options.Value.Bedrock.Models.GetValueOrDefault(tier.ToString());
+
+    public async Task<ProviderResponse> CompleteAsync(string model, string system, string user, int maxTokens, CancellationToken ct)
+    {
+        _client ??= new Amazon.BedrockRuntime.AmazonBedrockRuntimeClient(Amazon.RegionEndpoint.GetBySystemName(options.Value.Bedrock.Region!));
+        Amazon.BedrockRuntime.Model.ConverseResponse res;
+        try
+        {
+            res = await _client.ConverseAsync(new Amazon.BedrockRuntime.Model.ConverseRequest
+            {
+                ModelId = model,
+                System = [new Amazon.BedrockRuntime.Model.SystemContentBlock { Text = system }],
+                Messages = [new Amazon.BedrockRuntime.Model.Message
+                {
+                    Role = Amazon.BedrockRuntime.ConversationRole.User,
+                    Content = [new Amazon.BedrockRuntime.Model.ContentBlock { Text = user }],
+                }],
+                InferenceConfig = new Amazon.BedrockRuntime.Model.InferenceConfiguration { MaxTokens = maxTokens },
+            }, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new AiException($"Bedrock request failed: {ex.Message}", AiOutcome.Failed, ex);
+        }
+
+        var stop = res.StopReason?.Value ?? "";
+        if (stop is "content_filtered" or "guardrail_intervened") throw new AiException("The model declined this request (content filter).", AiOutcome.Refused);
+        if (stop == "max_tokens") throw new AiException("The response was cut off at the token limit.", AiOutcome.Failed);
+        var text = string.Concat(res.Output.Message.Content.Select(c => c.Text));
+        return new ProviderResponse(text, res.Usage.InputTokens ?? 0, res.Usage.OutputTokens ?? 0);
+    }
+}
+
 /// <summary>OpenAI Chat Completions over HTTP. Disabled unless an API key and tier->model map are configured.</summary>
 public sealed class OpenAiProvider(IHttpClientFactory http, IOptions<AiOptions> options) : IAiProvider
 {
