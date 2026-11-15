@@ -192,9 +192,45 @@ public sealed class PublishingScheduler(IServiceScopeFactory scopes, IClock cloc
                 var t = clock.UtcNow.ToUnixTimeSeconds();
                 await jobs.EnqueueAsync(new JobRequest(DispatchHandler.DispatchJob, "{}", IdempotencyKey: $"dispatch:{t / 60}"), stoppingToken);
                 await jobs.EnqueueAsync(new JobRequest(TokenCheckHandler.CheckJob, "{}", IdempotencyKey: $"tokencheck:{t / 3600}"), stoppingToken);
+                await jobs.EnqueueAsync(new JobRequest(PullInsightsHandler.PullJob, "{}", IdempotencyKey: $"insights:{t / 21600}"), stoppingToken);
             }
             catch (Exception) when (!stoppingToken.IsCancellationRequested) { /* next minute */ }
             await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken).ConfigureAwait(false);
         }
+    }
+}
+
+/// <summary>
+/// Pulls each connected account's recent daily figures into analytics. An adapter that cannot supply insights is skipped entirely,
+/// so a source is never shown as fresh when nothing was actually retrieved.
+/// </summary>
+public sealed class PullInsightsHandler(PublishingDbContext db, IEnumerable<IChannelPublisher> publishers, TokenVault vault, IClock clock, IMetricSink? sink = null) : IJobHandler
+{
+    public const string PullJob = "publishing.pull-insights";
+    public const int WindowDays = 7;
+    public string Type => PullJob;
+    public PauseScope? PauseScope => null;   // read-only
+
+    public async Task HandleAsync(JobContext c, CancellationToken ct)
+    {
+        if (sink is null) return;
+        var now = clock.UtcNow; var today = DateOnly.FromDateTime(now.UtcDateTime);
+        TransientJobException? failure = null;
+        foreach (var a in await db.Accounts.AsNoTracking().Where(a => a.Status == AccountStatus.Connected).ToListAsync(ct))
+        {
+            var publisher = publishers.FirstOrDefault(p => p.Provider == a.Provider);
+            if (publisher is null) continue;
+            try
+            {
+                var points = await publisher.GetInsightsAsync(new PostRequest(a.ExternalId, vault.Open(a.TokenCipher), ""), today.AddDays(-WindowDays), today.AddDays(-1), ct);
+                if (points is null) continue;   // not supported by this adapter
+                await sink.RecordAsync($"{a.Provider}:{a.DisplayName}", "Social", a.ProductId,
+                    points.Select(p => new MetricPoint(a.ProductId, p.MetricKey, p.Day, p.Day, p.Value, a.Channel)).ToList(), now, ct);
+            }
+            catch (PublishException ex) when (ex.Kind is PublishErrorKind.Retryable or PublishErrorKind.Unknown) { failure ??= new TransientJobException($"Insights for '{a.DisplayName}': {ex.Message}", ex.RetryAfter); }
+            catch (PublishException) { /* auth/permanent: the token check flags the account; freshness stays honest by not advancing */ }
+            catch (System.Security.Cryptography.CryptographicException) { /* unreadable token: flagged by the token check */ }
+        }
+        if (failure is not null) throw failure;
     }
 }

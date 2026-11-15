@@ -30,6 +30,7 @@
     <ProjectReference Include="..\..\src\Modules\Automation\TriSoftic.GrowthEngine.Modules.Automation.csproj" />
     <ProjectReference Include="..\..\src\Modules\Publishing\TriSoftic.GrowthEngine.Modules.Publishing.csproj" />
     <ProjectReference Include="..\..\src\Modules\Messaging\TriSoftic.GrowthEngine.Modules.Messaging.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Analytics\TriSoftic.GrowthEngine.Modules.Analytics.csproj" />
   </ItemGroup>
 
 </Project>

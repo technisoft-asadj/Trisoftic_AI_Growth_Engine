@@ -91,6 +91,10 @@ public sealed class ScriptedPublisher : TriSoftic.GrowthEngine.Modules.Publishin
         => Task.FromResult(Live.TryGetValue(r.Text, out var l) && l.Count > 0 ? new TriSoftic.GrowthEngine.Modules.Publishing.PostResult(l[0], "https://social.test/" + l[0]) : null);
 
     public static volatile bool AccountsValid = true;
+
+    public static volatile List<TriSoftic.GrowthEngine.Modules.Publishing.InsightPoint>? Insights;
+    public Task<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.InsightPoint>?> GetInsightsAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest account, DateOnly from, DateOnly to, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.InsightPoint>?>(Insights);
     public Task<bool> IsAccountValidAsync(string externalId, string accessToken, CancellationToken ct) => Task.FromResult(AccountsValid);
 }
 

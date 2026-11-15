@@ -38,6 +38,7 @@ public static class PublishingModule
         s.AddScoped<IJobHandler, PublishJobHandler>();
         s.AddScoped<IJobHandler, DispatchHandler>();
         s.AddScoped<IJobHandler, TokenCheckHandler>();
+        s.AddScoped<IJobHandler, PullInsightsHandler>();
         if (runScheduler || c.GetValue<bool>("Jobs:RunInProcess")) s.AddHostedService<PublishingScheduler>();
         return s;
     }

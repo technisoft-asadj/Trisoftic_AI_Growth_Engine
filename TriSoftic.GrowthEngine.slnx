@@ -28,6 +28,9 @@
   <Folder Name="/src/Modules/Messaging/">
     <Project Path="src/Modules/Messaging/TriSoftic.GrowthEngine.Modules.Messaging.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Analytics/">
+    <Project Path="src/Modules/Analytics/TriSoftic.GrowthEngine.Modules.Analytics.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Scheduling/">
     <Project Path="src/Modules/Scheduling/TriSoftic.GrowthEngine.Modules.Scheduling.csproj" />
   </Folder>

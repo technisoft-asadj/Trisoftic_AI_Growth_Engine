@@ -1,6 +1,7 @@
 using Serilog;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 using TriSoftic.GrowthEngine.BuildingBlocks.Security;
+using TriSoftic.GrowthEngine.Modules.Analytics;
 using TriSoftic.GrowthEngine.Modules.Automation;
 using TriSoftic.GrowthEngine.Modules.Content;
 using TriSoftic.GrowthEngine.Modules.Crm;
@@ -28,6 +29,7 @@ builder.Services.AddAutomationModule(builder.Configuration, runScheduler: true);
 builder.Services.AddContentModule(builder.Configuration);
 builder.Services.AddPublishingModule(builder.Configuration, runScheduler: true);
 builder.Services.AddMessagingModule(builder.Configuration);
+builder.Services.AddAnalyticsModule(builder.Configuration, runScheduler: true);
 // Job handlers (AI generation, publishing, imports, reminders...) register here as their modules are added.
 
 await builder.Build().RunAsync();

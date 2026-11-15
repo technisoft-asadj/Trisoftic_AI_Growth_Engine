@@ -39,6 +39,12 @@ public interface IChannelPublisher
     Task<PostResult?> FindRecentAsync(PostRequest request, CancellationToken ct);
 
     Task<bool> IsAccountValidAsync(string externalId, string accessToken, CancellationToken ct);
+
+    /// <summary>
+    /// Daily figures from the network (impressions, reach, followers...) using the platform's metric keys. Returns null when this adapter cannot supply them,
+    /// in which case nothing is recorded and no freshness is claimed.
+    /// </summary>
+    Task<IReadOnlyList<InsightPoint>?> GetInsightsAsync(PostRequest account, DateOnly from, DateOnly to, CancellationToken ct) => Task.FromResult<IReadOnlyList<InsightPoint>?>(null);
 }
 
 /// <summary>A pretend network for demos and tests: accepts anything, remembers what it was given. Enabled only when Publishing:AllowSandbox is true.</summary>
@@ -174,3 +180,6 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
         }
     }
 }
+
+/// <summary>One day's figure from a network's own reporting. A null value means the network could not provide it.</summary>
+public sealed record InsightPoint(string MetricKey, DateOnly Day, decimal? Value);

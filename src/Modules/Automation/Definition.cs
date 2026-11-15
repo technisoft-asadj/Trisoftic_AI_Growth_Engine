@@ -68,6 +68,7 @@ public static partial class Definitions
         ["opportunity.stage-changed"] = ["name", "status", "stage", "previousStage", "stageKind", "value", "currency", "ownerUserId", "contactName"],
         ["booking.created"] = ["status", "attendeeName", "attendeeEmail", "start", "ownerUserId", "leadId"],
         ["booking.cancelled"] = ["status", "attendeeName", "attendeeEmail", "start", "ownerUserId", "leadId"],
+        ["analytics.source-stale"] = ["name", "kind", "hoursSinceUpdate", "freshnessHours"],
     };
 
     public static bool IsKnownTrigger(string t) => Triggers.ContainsKey(t) || ExternalTrigger().IsMatch(t);

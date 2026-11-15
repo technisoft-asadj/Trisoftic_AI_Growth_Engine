@@ -2,6 +2,7 @@
 using Serilog.Context;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 using TriSoftic.GrowthEngine.Modules.Ai;
+using TriSoftic.GrowthEngine.Modules.Analytics;
 using TriSoftic.GrowthEngine.Modules.Assets;
 using TriSoftic.GrowthEngine.Modules.Automation;
 using TriSoftic.GrowthEngine.Modules.Content;
@@ -57,6 +58,7 @@ public sealed class DatabaseMigrationHostedService(IServiceProvider sp, IConfigu
                 await IdentitySeeder.SeedAsync(sp, ct);
                 await PortfolioModule.SeedAsync(sp, ct);
                 await CrmModule.SeedAsync(sp, ct);
+                await AnalyticsModule.SeedAsync(sp, ct);
                 return;
             }
             catch (Exception ex) when (attempt < 10 && !ct.IsCancellationRequested)
@@ -88,6 +90,7 @@ public static class ModuleContexts
         typeof(AutomationDbContext),
         typeof(PublishingDbContext),
         typeof(MessagingDbContext),
+        typeof(AnalyticsDbContext),
     ];
 }
 
@@ -107,6 +110,7 @@ public static class PlatformRegistration
         s.AddAutomationModule(c, runScheduler: false);   // the worker host runs the sweep scheduler
         s.AddPublishingModule(c, runScheduler: false);   // ...and the publishing dispatcher
         s.AddMessagingModule(c);
+        s.AddAnalyticsModule(c, runScheduler: false);
         return s;
     }
 
@@ -126,6 +130,7 @@ public static class PlatformRegistration
         app.MapAutomationEndpoints();
         app.MapPublishingEndpoints();
         app.MapMessagingEndpoints();
+        app.MapAnalyticsEndpoints();
         return app;
     }
 }
