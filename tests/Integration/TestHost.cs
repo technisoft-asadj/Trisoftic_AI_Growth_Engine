@@ -1,7 +1,9 @@
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Testcontainers.PostgreSql;
+using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 
 namespace TriSoftic.GrowthEngine.Tests.Integration;
 
@@ -28,6 +30,14 @@ public sealed class TestHost : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("Database:MigrateOnStartup", "true");
         builder.UseSetting("Bootstrap:AdminEmail", AdminEmail);
         builder.UseSetting("Bootstrap:AdminPassword", AdminPassword);
+
+        builder.ConfigureServices(s =>
+        {
+            s.RemoveAll<IClock>();
+            s.AddSingleton<FakeClock>();
+            s.AddSingleton<IClock>(sp => sp.GetRequiredService<FakeClock>());
+            s.AddScoped<IJobHandler, TestJobHandler>();
+        });
     }
 
     public HttpClient NewClient()

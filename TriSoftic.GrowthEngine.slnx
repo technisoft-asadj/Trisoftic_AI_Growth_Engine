@@ -16,6 +16,9 @@
   <Folder Name="/src/Modules/Identity/">
     <Project Path="src/Modules/Identity/TriSoftic.GrowthEngine.Modules.Identity.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Jobs/">
+    <Project Path="src/Modules/Jobs/TriSoftic.GrowthEngine.Modules.Jobs.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Portfolio/">
     <Project Path="src/Modules/Portfolio/TriSoftic.GrowthEngine.Modules.Portfolio.csproj" />
   </Folder>

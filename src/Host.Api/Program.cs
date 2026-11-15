@@ -17,6 +17,7 @@ builder.Host.UseSerilog((ctx, sp, cfg) => cfg
 builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddScoped<ICorrelationContext, CorrelationContext>();
 builder.Services.AddProblemDetails();
+builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddOpenApi();
 
 builder.Services.AddIdentityModule(builder.Configuration);

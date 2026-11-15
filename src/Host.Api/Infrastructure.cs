@@ -4,6 +4,7 @@ using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 using TriSoftic.GrowthEngine.Modules.Governance.Persistence;
 using TriSoftic.GrowthEngine.Modules.Identity;
 using TriSoftic.GrowthEngine.Modules.Identity.Persistence;
+using TriSoftic.GrowthEngine.Modules.Jobs;
 
 namespace TriSoftic.GrowthEngine.Host.Api;
 
@@ -63,13 +64,22 @@ public static class ModuleContexts
     [
         typeof(GovernanceDbContext),
         typeof(IdentityModuleDbContext),
+        typeof(JobsDbContext),
     ];
 }
 
 public static class PlatformRegistration
 {
-    /// <summary>Jobs, Portfolio, ... register here as they are added.</summary>
-    public static IServiceCollection AddPlatformModules(this IServiceCollection s, IConfiguration c) => s;
+    /// <summary>Modules beyond Identity/Governance register here as they are added.</summary>
+    public static IServiceCollection AddPlatformModules(this IServiceCollection s, IConfiguration c)
+    {
+        s.AddJobsModule(c, runWorker: false);
+        return s;
+    }
 
-    public static IEndpointRouteBuilder MapPlatformEndpoints(this IEndpointRouteBuilder app) => app;
+    public static IEndpointRouteBuilder MapPlatformEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapJobsEndpoints();
+        return app;
+    }
 }
