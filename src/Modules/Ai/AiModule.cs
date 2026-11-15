@@ -101,6 +101,35 @@ public static class AiModule
                 rows.Select(r => new ProductUsage(r.ProductId, r.Cost, r.Calls, r.Cost >= o.MonthlyBudgetUsdPerProduct * o.AlertThreshold, r.Cost >= o.MonthlyBudgetUsdPerProduct)).ToList()));
         });
 
+        // Cost breakdown for one calendar month (default: current). Every grouping is a view of the same succeeded rows, so each one sums to `totalUsd`.
+        g.MapGet("/ai/usage/breakdown", async (AiDbContext db, ICurrentUser u, IClock clock, CancellationToken ct, string? month) =>
+        {
+            if (!u.HasPermission(Permissions.BudgetRead)) return Results.Forbid();
+            var now = clock.UtcNow;
+            var first = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+            if (month is not null)
+            {
+                if (!DateTime.TryParseExact(month, "yyyy-MM", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var m))
+                    return Results.Problem(statusCode: 400, title: "Month must look like 2026-11");
+                first = new DateTimeOffset(m.Year, m.Month, 1, 0, 0, 0, TimeSpan.Zero);
+            }
+            var next = first.AddMonths(1);
+            var all = await db.Usage.AsNoTracking().Where(x => x.OccurredAt >= first && x.OccurredAt < next)
+                .Select(x => new { x.Provider, x.Model, x.Purpose, x.ProductId, x.InputTokens, x.OutputTokens, x.EstimatedCostUsd, x.Outcome }).ToListAsync(ct);
+            var ok = all.Where(x => x.Outcome == AiOutcome.Succeeded).ToList();
+            var total = ok.Sum(x => x.EstimatedCostUsd);
+            return Results.Ok(new
+            {
+                month = first.ToString("yyyy-MM"),
+                totalUsd = total,
+                calls = ok.Count,
+                byModel = ok.GroupBy(x => (x.Provider, x.Model)).Select(g2 => new { g2.Key.Provider, g2.Key.Model, calls = g2.Count(), inputTokens = g2.Sum(x => (long)x.InputTokens), outputTokens = g2.Sum(x => (long)x.OutputTokens), costUsd = g2.Sum(x => x.EstimatedCostUsd) }).OrderByDescending(x => x.costUsd).ToList(),
+                byProduct = ok.GroupBy(x => x.ProductId).Select(g2 => new { productId = g2.Key, calls = g2.Count(), costUsd = g2.Sum(x => x.EstimatedCostUsd) }).OrderByDescending(x => x.costUsd).ToList(),
+                byPurpose = ok.GroupBy(x => x.Purpose).Select(g2 => new { purpose = g2.Key, calls = g2.Count(), costUsd = g2.Sum(x => x.EstimatedCostUsd) }).OrderByDescending(x => x.costUsd).ToList(),
+                notCharged = all.Where(x => x.Outcome != AiOutcome.Succeeded).GroupBy(x => x.Outcome.ToString()).Select(g2 => new { outcome = g2.Key, calls = g2.Count() }).ToList(),
+            });
+        });
+
         return app;
     }
 }

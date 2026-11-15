@@ -114,6 +114,22 @@ public sealed class AiTests(TestHost host)
     }
 
     [Fact]
+    public async Task Usage_breakdown_groupings_each_reconcile_to_the_total()
+    {
+        var admin = await host.LoginAdminAsync();
+        var pid = await ProductWithApprovedProfileAsync(admin);
+        Script(Good); Assert.Equal(HttpStatusCode.OK, (await Generate(admin, pid)).StatusCode);
+
+        var b = await admin.GetFromJsonAsync<JsonElement>("/api/v1/ai/usage/breakdown", Json);
+        var total = b.GetProperty("totalUsd").GetDecimal();
+        Assert.True(b.GetProperty("calls").GetInt32() >= 1);
+        foreach (var grouping in new[] { "byModel", "byProduct", "byPurpose" })
+            Assert.Equal(total, b.GetProperty(grouping).EnumerateArray().Sum(x => x.GetProperty("costUsd").GetDecimal()));
+        Assert.Equal(b.GetProperty("calls").GetInt32(), b.GetProperty("byModel").EnumerateArray().Sum(x => x.GetProperty("calls").GetInt32()));
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync("/api/v1/ai/usage/breakdown?month=nope")).StatusCode);
+    }
+
+    [Fact]
     public async Task Invented_statistic_is_repaired_on_second_attempt()
     {
         var admin = await host.LoginAdminAsync();
