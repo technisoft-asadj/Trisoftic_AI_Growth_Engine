@@ -138,11 +138,18 @@ namespace TriSoftic.GrowthEngine.Modules.Content.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
+                    b.Property<string>("LastPublishError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("ProductId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset?>("ScheduledFor")
                         .HasColumnType("timestamp with time zone");

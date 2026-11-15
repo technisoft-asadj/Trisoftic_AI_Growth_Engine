@@ -22,6 +22,9 @@
   <Folder Name="/src/Modules/Automation/">
     <Project Path="src/Modules/Automation/TriSoftic.GrowthEngine.Modules.Automation.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Publishing/">
+    <Project Path="src/Modules/Publishing/TriSoftic.GrowthEngine.Modules.Publishing.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Scheduling/">
     <Project Path="src/Modules/Scheduling/TriSoftic.GrowthEngine.Modules.Scheduling.csproj" />
   </Folder>

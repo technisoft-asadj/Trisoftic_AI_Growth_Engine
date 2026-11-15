@@ -88,7 +88,12 @@ public static partial class SchedulingModule
         return (SlotGenerator.Generate(Spec(t, zone), rules, closed, staff, busy, now, from, to), t);
     }
 
-    private static bool IsViolation(DbUpdateException ex, string sqlState) => ex.InnerException is PostgresException pg && pg.SqlState == sqlState;
+    /// <summary>True if Postgres reported this SQLSTATE anywhere in the chain. EF wraps "transient" errors such as deadlocks in an InvalidOperationException, so the top exception alone is not enough.</summary>
+    private static bool IsViolation(Exception ex, string sqlState)
+    {
+        for (var e = ex; e is not null; e = e.InnerException) if (e is PostgresException pg && pg.SqlState == sqlState) return true;
+        return false;
+    }
 
     /// <summary>
     /// Places a booking on the first free staff member. The exclusion constraint in the database is the real guard: if two requests race
@@ -124,6 +129,9 @@ public static partial class SchedulingModule
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             try
             {
+                // Racing requests for one staff member queue here instead of colliding inside the constraint check (which can deadlock).
+                // The lock is released with the transaction. The exclusion constraint below still decides who wins; this only keeps the losers orderly.
+                await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(hashtextextended({0}, 0))", [staffId.ToString()], ct);
                 if (replacing is not null)
                 {
                     var old = await db.Bookings.FirstAsync(x => x.Id == replacing.Id, ct);
@@ -135,7 +143,7 @@ public static partial class SchedulingModule
                 await tx.CommitAsync(ct);
                 return (b, null);
             }
-            catch (DbUpdateException ex) when (IsViolation(ex, PostgresErrorCodes.ExclusionViolation) || IsViolation(ex, PostgresErrorCodes.DeadlockDetected) || IsViolation(ex, PostgresErrorCodes.SerializationFailure))
+            catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException && (IsViolation(ex, PostgresErrorCodes.ExclusionViolation) || IsViolation(ex, PostgresErrorCodes.DeadlockDetected) || IsViolation(ex, PostgresErrorCodes.SerializationFailure)))
             {
                 // Someone else took this staff member's time (racing inserts on the exclusion constraint can surface as a deadlock abort
                 // instead of a violation; either way this attempt lost). Try the next staff member.

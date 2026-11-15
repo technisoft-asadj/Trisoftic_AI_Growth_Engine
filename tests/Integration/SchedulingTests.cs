@@ -84,6 +84,7 @@ public sealed class SchedulingTests(TestHost host)
         var results = await Task.WhenAll(Enumerable.Range(0, 12).Select(async _ =>
             (await host.NewClient().PostAsJsonAsync($"/api/v1/public/booking/{key}/book", Attendee(slot))).StatusCode));
 
+        Assert.True(results.All(s => s is HttpStatusCode.Created or HttpStatusCode.Conflict), string.Join(",", results.GroupBy(s => s).Select(g => g.Key + "x" + g.Count())));
         Assert.Equal(3, results.Count(s => s == HttpStatusCode.Created));   // one per staff member
         Assert.Equal(9, results.Count(s => s == HttpStatusCode.Conflict));
     }

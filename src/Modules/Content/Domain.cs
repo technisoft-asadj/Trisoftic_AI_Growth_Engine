@@ -29,7 +29,7 @@ public sealed class Campaign : IOrganizationScoped
 }
 
 /// <summary>Draft -> InReview -> Approved -> Scheduled; Publishing/Published/Failed join in Phase 3. Rejected and Cancelled end a version's life.</summary>
-public enum ContentStatus { Draft, InReview, Approved, Rejected, Scheduled, Cancelled }
+public enum ContentStatus { Draft, InReview, Approved, Rejected, Scheduled, Cancelled, Publishing, Published, PublishFailed }
 
 public sealed class ContentItem : IOrganizationScoped
 {
@@ -46,6 +46,8 @@ public sealed class ContentItem : IOrganizationScoped
     public int? ApprovedVersion { get; set; }
     public ContentStatus Status { get; set; } = ContentStatus.Draft;
     public DateTimeOffset? ScheduledFor { get; set; }
+    public DateTimeOffset? PublishedAt { get; set; }
+    public string? LastPublishError { get; set; }
     public Guid? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -54,6 +56,7 @@ public sealed class ContentItem : IOrganizationScoped
     public void AddVersion(int number)
     {
         if (Status == ContentStatus.Cancelled) throw new IllegalTransitionException("Cancelled content cannot be edited");
+        if (Status == ContentStatus.Publishing) throw new IllegalTransitionException("Content that is being published cannot be edited");
         CurrentVersion = number; Status = ContentStatus.Draft; ScheduledFor = null;
     }
 
@@ -103,7 +106,46 @@ public sealed class ContentItem : IOrganizationScoped
     public void Cancel()
     {
         if (Status == ContentStatus.Cancelled) throw new IllegalTransitionException("Already cancelled");
+        if (Status is ContentStatus.Publishing or ContentStatus.Published) throw new IllegalTransitionException($"{Status} content cannot be cancelled");
         Status = ContentStatus.Cancelled; ScheduledFor = null;
+    }
+
+    // ---- publishing (driven only by the publishing pipeline; "Published" always means the provider confirmed it) ----
+
+    /// <summary>Claims the item for publishing. Allowed from Scheduled, or from Publishing again when a job is retried. Only the approved, current version may go out.</summary>
+    public void BeginPublish(int version)
+    {
+        if (Status is not (ContentStatus.Scheduled or ContentStatus.Publishing)) throw new IllegalTransitionException($"Only Scheduled content can be published (was {Status})");
+        if (version != CurrentVersion || ApprovedVersion != version) throw new IllegalTransitionException($"Version {version} is not the approved, current version");
+        Status = ContentStatus.Publishing;
+    }
+
+    public void CompletePublish(int version, DateTimeOffset at)
+    {
+        if (Status is not (ContentStatus.Publishing or ContentStatus.PublishFailed)) throw new IllegalTransitionException($"Content in {Status} cannot be marked published");
+        if (version != CurrentVersion) throw new IllegalTransitionException($"Version {version} is no longer the current version");
+        Status = ContentStatus.Published; PublishedAt = at; LastPublishError = null; ScheduledFor = null;
+    }
+
+    public void FailPublish(int version, string reason)
+    {
+        if (Status is not (ContentStatus.Publishing or ContentStatus.Scheduled)) throw new IllegalTransitionException($"Content in {Status} cannot be marked as failed");
+        if (version != CurrentVersion) throw new IllegalTransitionException($"Version {version} is no longer the current version");
+        Status = ContentStatus.PublishFailed; LastPublishError = reason.Length > 1000 ? reason[..1000] : reason;
+    }
+
+    public void Requeue(int version, DateTimeOffset at)
+    {
+        if (Status != ContentStatus.PublishFailed) throw new IllegalTransitionException($"Only failed content can be retried (was {Status})");
+        if (version != CurrentVersion || ApprovedVersion != version) throw new IllegalTransitionException($"Version {version} is not the approved, current version");
+        Status = ContentStatus.Scheduled; ScheduledFor = at;
+    }
+
+    public void Abandon(int version)
+    {
+        if (Status != ContentStatus.PublishFailed) throw new IllegalTransitionException($"Only failed content can be abandoned (was {Status})");
+        if (version != CurrentVersion) throw new IllegalTransitionException($"Version {version} is no longer the current version");
+        Status = ContentStatus.Approved; ScheduledFor = null;
     }
 }
 
@@ -152,6 +194,7 @@ public sealed class ContentDbContext(DbContextOptions<ContentDbContext> options)
             e.ToTable("items"); e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(300).IsRequired();
             e.Property(x => x.Channel).HasMaxLength(60);
+            e.Property(x => x.LastPublishError).HasMaxLength(1000);
             e.Property(x => x.Format).HasMaxLength(40);
             e.Property(x => x.Language).HasMaxLength(40);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);

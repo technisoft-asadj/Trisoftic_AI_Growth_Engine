@@ -19,6 +19,8 @@
     <ProjectReference Include="..\Modules\Crm\TriSoftic.GrowthEngine.Modules.Crm.csproj" />
     <ProjectReference Include="..\Modules\Scheduling\TriSoftic.GrowthEngine.Modules.Scheduling.csproj" />
     <ProjectReference Include="..\Modules\Automation\TriSoftic.GrowthEngine.Modules.Automation.csproj" />
+    <ProjectReference Include="..\Modules\Publishing\TriSoftic.GrowthEngine.Modules.Publishing.csproj" />
+    <ProjectReference Include="..\Modules\Content\TriSoftic.GrowthEngine.Modules.Content.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />

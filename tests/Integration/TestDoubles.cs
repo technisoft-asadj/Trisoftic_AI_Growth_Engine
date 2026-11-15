@@ -50,3 +50,56 @@ public sealed class FakeWebhookClient : TriSoftic.GrowthEngine.Modules.Automatio
         return Task.CompletedTask;
     }
 }
+
+/// <summary>
+/// A scriptable social network. Behaviour is chosen per post text: queue "retryable", "unknown-accepted" (the post goes live but we hear a timeout),
+/// "unknown-lost" (timeout and nothing went live), "permanent" or "auth"; with nothing queued the post simply succeeds.
+/// <see cref="Live"/> records what actually went live, so tests can prove no duplicate was created.
+/// </summary>
+public sealed class ScriptedPublisher : TriSoftic.GrowthEngine.Modules.Publishing.IChannelPublisher
+{
+    public static readonly ConcurrentDictionary<string, ConcurrentQueue<string>> Script = new();
+    public static readonly ConcurrentDictionary<string, List<string>> Live = new();
+    public static readonly ConcurrentDictionary<string, int> Calls = new();
+
+    public static void Queue(string text, params string[] behaviours) { var q = Script.GetOrAdd(text, _ => new()); foreach (var b in behaviours) q.Enqueue(b); }
+    public static int LiveCount(string text) => Live.TryGetValue(text, out var l) ? l.Count : 0;
+
+    public string Provider => "sandbox";
+    public int MaxTextLength => 400;
+    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post"];
+
+    public Task<TriSoftic.GrowthEngine.Modules.Publishing.PostResult> PublishAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest r, CancellationToken ct)
+    {
+        Calls.AddOrUpdate(r.Text, 1, (_, n) => n + 1);
+        var next = Script.TryGetValue(r.Text, out var q) && q.TryDequeue(out var b) ? b : "ok";
+        var K = TriSoftic.GrowthEngine.Modules.Publishing.PublishErrorKind.Retryable;
+        switch (next)
+        {
+            case "retryable": throw new TriSoftic.GrowthEngine.Modules.Publishing.PublishException(K, "rate limited");
+            case "unknown-lost": throw new TriSoftic.GrowthEngine.Modules.Publishing.PublishException(TriSoftic.GrowthEngine.Modules.Publishing.PublishErrorKind.Unknown, "timeout");
+            case "permanent": throw new TriSoftic.GrowthEngine.Modules.Publishing.PublishException(TriSoftic.GrowthEngine.Modules.Publishing.PublishErrorKind.Permanent, "text rejected by policy");
+            case "auth": throw new TriSoftic.GrowthEngine.Modules.Publishing.PublishException(TriSoftic.GrowthEngine.Modules.Publishing.PublishErrorKind.AuthExpired, "token revoked");
+        }
+        var id = "post-" + Guid.NewGuid().ToString("N")[..10];
+        Live.AddOrUpdate(r.Text, _ => [id], (_, l) => { lock (l) l.Add(id); return l; });
+        if (next == "unknown-accepted") throw new TriSoftic.GrowthEngine.Modules.Publishing.PublishException(TriSoftic.GrowthEngine.Modules.Publishing.PublishErrorKind.Unknown, "timeout after the provider accepted it");
+        return Task.FromResult(new TriSoftic.GrowthEngine.Modules.Publishing.PostResult(id, "https://social.test/" + id));
+    }
+
+    public Task<TriSoftic.GrowthEngine.Modules.Publishing.PostResult?> FindRecentAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest r, CancellationToken ct)
+        => Task.FromResult(Live.TryGetValue(r.Text, out var l) && l.Count > 0 ? new TriSoftic.GrowthEngine.Modules.Publishing.PostResult(l[0], "https://social.test/" + l[0]) : null);
+
+    public static volatile bool AccountsValid = true;
+    public Task<bool> IsAccountValidAsync(string externalId, string accessToken, CancellationToken ct) => Task.FromResult(AccountsValid);
+}
+
+/// <summary>Facebook's OAuth side, faked: one consent screen, two pages.</summary>
+public sealed class FakeFacebookGraph : TriSoftic.GrowthEngine.Modules.Publishing.IFacebookGraph
+{
+    public bool IsConfigured => true;
+    public string AuthorizeUrl(string state) => "https://facebook.test/dialog?state=" + Uri.EscapeDataString(state);
+    public Task<string> ExchangeCodeAsync(string code, CancellationToken ct) => Task.FromResult("user-token-for-" + code);
+    public Task<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageInfo>> ListPagesAsync(string userToken, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageInfo>>([new("111", "Ludo Fight Official", "page-secret-token-111"), new("222", "Other Page", "page-secret-token-222")]);
+}

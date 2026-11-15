@@ -19,6 +19,7 @@ public static class ContentModule
     {
         s.AddModuleDbContext<ContentDbContext>(c, ContentDbContext.Schema);
         s.AddScoped<IApprovalSubjectHandler, ContentApprovalHandler>();
+        s.AddScoped<IContentPublishSource, ContentPublishSource>();
         return s;
     }
 
@@ -126,6 +127,7 @@ public static class ContentModule
             if (req.BaseVersion != i.CurrentVersion) return Results.Problem(statusCode: 409, title: $"Someone saved v{i.CurrentVersion} since you opened v{req.BaseVersion}. Reload and merge your changes.");
             if ((req.Body ?? "").Length > 60000) return Results.Problem(statusCode: 400, title: "The body is too long");
             if (i.Status == ContentStatus.Cancelled) return Results.Problem(statusCode: 409, title: "Cancelled content cannot be edited");
+            if (i.Status == ContentStatus.Publishing) return Results.Problem(statusCode: 409, title: "This content is being published right now; edit it once publishing finishes");
 
             var wasInReview = i.Status == ContentStatus.InReview;
             var wasScheduled = i.Status == ContentStatus.Scheduled;
