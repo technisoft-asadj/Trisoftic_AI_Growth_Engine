@@ -6,6 +6,7 @@ import { ProductPage } from './pages/Product.tsx'
 import { ApprovalsPage } from './pages/Approvals.tsx'
 import { AdminPage } from './pages/Admin.tsx'
 import { CalendarPage } from './pages/Content.tsx'
+import { CrmPage } from './pages/Crm.tsx'
 
 export default function App() {
   const { me, loading, can, logout } = useAuth()
@@ -19,6 +20,7 @@ export default function App() {
         <nav>
           {can('products.read') && <NavLink to="/products">Products</NavLink>}
           <NavLink to="/calendar">Calendar</NavLink>
+          {can('crm.read') && <NavLink to="/crm">CRM</NavLink>}
           <NavLink to="/approvals">Approvals</NavLink>
           {(can('audit.read') || can('jobs.manage') || can('governance.pause')) && <NavLink to="/admin">Admin</NavLink>}
         </nav>
@@ -32,7 +34,8 @@ export default function App() {
           <Route path="/products" element={<ProductsPage />} />
           <Route path="/products/:id/*" element={<ProductPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
-          <Route path="/approvals" element={<ApprovalsPage />} />
+          <Route path="/crm/*" element={<CrmPage />} />
+          <Route path="/approvals"element={<ApprovalsPage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Routes>

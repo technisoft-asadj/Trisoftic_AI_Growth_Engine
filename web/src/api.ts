@@ -40,6 +40,7 @@ export const api = {
   get: <T>(p: string) => request<T>('GET', p),
   post: <T>(p: string, b?: Json) => request<T>('POST', p, b ?? ({} as Json)),
   put: <T>(p: string, b: Json) => request<T>('PUT', p, b),
+  del: <T>(p: string) => request<T>('DELETE', p),
   upload: <T>(p: string, f: FormData) => request<T>('POST', p, f),
 }
 
