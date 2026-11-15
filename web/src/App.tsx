@@ -8,10 +8,13 @@ import { ApprovalsPage } from './pages/Approvals.tsx'
 import { AdminPage } from './pages/Admin.tsx'
 import { CalendarPage } from './pages/Content.tsx'
 import { CrmPage } from './pages/Crm.tsx'
+import { InboxPage, useWorkSummary } from './pages/Inbox.tsx'
+import { AutomationPage } from './pages/Automation.tsx'
 
 export default function App() {
   const { me, loading, can, logout } = useAuth()
   const path = useLocation().pathname
+  const summary = useWorkSummary(!!me)
   // Public booking pages work without signing in.
   if (path.startsWith('/book/')) return <Routes><Route path="/book/:key" element={<PublicBookingPage />} /></Routes>
   if (path.startsWith('/booking/')) return <Routes><Route path="/booking/:token" element={<ManageBookingPage />} /></Routes>
@@ -26,6 +29,8 @@ export default function App() {
           {can('products.read') && <NavLink to="/products">Products</NavLink>}
           <NavLink to="/calendar">Calendar</NavLink>
           {can('crm.read') && <NavLink to="/crm">CRM</NavLink>}
+          <NavLink to="/inbox">Inbox{!!summary.data?.unreadNotifications && <span className="badge warn"> {summary.data.unreadNotifications}</span>}{!!summary.data?.overdueTasks && <span className="badge warn"> {summary.data.overdueTasks} overdue</span>}</NavLink>
+          {can('automation.manage') && <NavLink to="/automation">Automation</NavLink>}
           <NavLink to="/approvals">Approvals</NavLink>
           {(can('audit.read') || can('jobs.manage') || can('governance.pause')) && <NavLink to="/admin">Admin</NavLink>}
         </nav>
@@ -40,6 +45,8 @@ export default function App() {
           <Route path="/products/:id/*" element={<ProductPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/crm/*" element={<CrmPage />} />
+          <Route path="/inbox" element={<InboxPage />} />
+          <Route path="/automation" element={<AutomationPage />} />
           <Route path="/approvals"element={<ApprovalsPage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="*" element={<p>Page not found.</p>} />
