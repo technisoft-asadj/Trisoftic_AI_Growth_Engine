@@ -21,6 +21,16 @@ Last updated: 2026-11-15 (overnight autonomous run). Source of truth for scope/o
 
 Tests: 17 unit + 7 architecture + 35 integration (real Postgres via Testcontainers), all passing at the last run. Reproduce: `dotnet test`.
 
+### Phase 2
+
+| WP | What | Status |
+|---|---|---|
+| 2.A1 | Campaigns (brief: objective, audience, market, channels, destination, tracking, budget plan, dates, thresholds; status rules) | Done |
+| 2.A2 | Content items with immutable versions, 12 formats, optimistic concurrency, link to saved AI drafts | Done |
+| 2.A3 | Submit -> approve / request changes / reject through the approval engine; approvals are bound to the exact version; editing approved/scheduled/in-review content invalidates earlier approval and withdraws the pending request | Done (state machine unit-tested, flow integration-tested) |
+| 2.A4 | Schedule queue + calendar API and UI (only the approved current version can be scheduled; past times refused) | Done. **Nothing publishes yet**; scheduled items wait for Phase 3 |
+| 2.B1-2.B7 | Consent service, CRM contacts/organizations, leads, pipeline | **Not started** (next) |
+
 ## Decisions made on your behalf (override any)
 
 - First social channel: **Facebook Page** (plan default). Not started; Phase 3.

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError, type AssetItem, type Fact, type Claim, type Grounded, type Product, type Profile, type ProfileVersion } from '../api.ts'
 import { useAuth } from '../auth.tsx'
 import { StrategiesTab } from './Strategies.tsx'
+import { CampaignsTab, ContentTab } from './Content.tsx'
 
 const emptyProfile = (): Profile => ({ summary: '', facts: [], claims: [], markets: [], platforms: [], personas: [], brandVoice: { dos: [], donts: [] }, links: [], competitors: [] })
 const lines = (t: string) => t.split('\n').map((s) => s.trim()).filter(Boolean)
@@ -34,6 +35,8 @@ export function ProductPage() {
         <NavLink to="profile">Profile</NavLink>
         {can('assets.read') && <NavLink to="assets">Assets</NavLink>}
         {can('products.read') && <NavLink to="strategies">Strategies</NavLink>}
+        {can('products.read') && <NavLink to="campaigns">Campaigns</NavLink>}
+        {can('products.read') && <NavLink to="content">Content</NavLink>}
         {can('ai.generate') && <NavLink to="generate">AI studio</NavLink>}
       </nav>
       <Routes>
@@ -41,6 +44,8 @@ export function ProductPage() {
         <Route path="profile" element={<ProfileTab productId={p.id} />} />
         <Route path="assets" element={<AssetsTab productId={p.id} />} />
         <Route path="strategies" element={<StrategiesRoute productId={p.id} />} />
+        <Route path="campaigns" element={<CampaignsTab productId={p.id} />} />
+        <Route path="content" element={<ContentTab productId={p.id} />} />
         <Route path="generate" element={<GenerateTab product={p} />} />
       </Routes>
     </>
