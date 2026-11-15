@@ -28,6 +28,16 @@ builder.Services.AddIdentityModule(builder.Configuration);
 builder.Services.AddGovernanceModule(builder.Configuration);
 builder.Services.AddPlatformModules(builder.Configuration);
 
+// Anonymous lead forms are throttled per form key + client address (default 20 submissions a minute; RateLimits:PublicFormsPerMinute).
+var formsPerMinute = builder.Configuration.GetValue<int?>("RateLimits:PublicFormsPerMinute") ?? 20;
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.AddPolicy(TriSoftic.GrowthEngine.Modules.Crm.CrmModule.PublicFormsPolicy, ctx => System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+        $"{ctx.Request.RouteValues["key"]}|{ctx.Connection.RemoteIpAddress}",
+        _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions { PermitLimit = formsPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
+
 builder.Services.AddHealthChecks()
     .AddNpgSql(builder.Configuration.GetConnectionString("Default")!, name: "postgres", tags: ["ready"]);
 
@@ -39,6 +49,8 @@ var app = builder.Build();
 app.UseForwardedHeaders();
 app.UseExceptionHandler();
 app.UseMiddleware<CorrelationMiddleware>();
+app.UseCors();
+app.UseRateLimiter();
 app.UseSerilogRequestLogging();
 app.UseAuthentication();
 app.UseCsrfHeaderGuard();

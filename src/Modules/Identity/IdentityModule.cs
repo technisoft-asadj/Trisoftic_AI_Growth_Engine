@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 using TriSoftic.GrowthEngine.BuildingBlocks.Persistence;
 using TriSoftic.GrowthEngine.BuildingBlocks.Security;
 using TriSoftic.GrowthEngine.Modules.Identity.Domain;
@@ -48,6 +49,7 @@ public static class IdentityModule
 
         s.AddAuthorization();
         s.AddScoped<ICurrentUser, CurrentUser>();
+        s.AddScoped<IUserDirectory, UserDirectory>();
         return s;
     }
 
@@ -61,6 +63,7 @@ public static class IdentityModule
         var unsafeMethod = !(HttpMethods.IsGet(m) || HttpMethods.IsHead(m) || HttpMethods.IsOptions(m));
         if (unsafeMethod && ctx.Request.Path.StartsWithSegments("/api")
             && !ctx.Request.Path.StartsWithSegments("/api/v1/webhooks") // webhooks authenticate by signature
+            && !ctx.Request.Path.StartsWithSegments("/api/v1/public")   // anonymous public forms (no cookie, so no CSRF surface)
             && !ctx.Request.Headers.ContainsKey("X-Requested-With"))
         {
             ctx.Response.StatusCode = StatusCodes.Status400BadRequest;

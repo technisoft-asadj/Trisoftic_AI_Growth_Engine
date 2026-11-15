@@ -131,6 +131,7 @@ public static class IdentityEndpoints
             return Results.NoContent();
         });
 
+        app.MapUserDirectoryEndpoints();
         return app;
     }
 }

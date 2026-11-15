@@ -124,6 +124,9 @@ public sealed class CrmDbContext(DbContextOptions<CrmDbContext> options) : DbCon
     public DbSet<Interaction> Interactions => Set<Interaction>();
     public DbSet<ConsentRecord> Consents => Set<ConsentRecord>();
     public DbSet<Suppression> Suppressions => Set<Suppression>();
+    public DbSet<Lead> Leads => Set<Lead>();
+    public DbSet<LeadForm> LeadForms => Set<LeadForm>();
+    public DbSet<ScoreRule> ScoreRules => Set<ScoreRule>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -195,6 +198,39 @@ public sealed class CrmDbContext(DbContextOptions<CrmDbContext> options) : DbCon
             e.Property(x => x.Evidence).HasMaxLength(2000);
             e.HasIndex(x => new { x.ContactId, x.Channel, x.Purpose, x.RecordedAt });
             e.HasOne<Contact>().WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<Lead>(e =>
+        {
+            e.ToTable("leads"); e.HasKey(x => x.Id);
+            e.Property(x => x.Source).HasMaxLength(200);
+            e.Property(x => x.Message).HasMaxLength(4000);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.NextAction).HasMaxLength(500);
+            e.Property(x => x.QualificationNote).HasMaxLength(2000);
+            e.Property(x => x.DisqualifyReason).HasMaxLength(500);
+            e.HasIndex(x => new { x.ProductId, x.Status });
+            e.HasIndex(x => x.OwnerUserId);
+            e.HasIndex(x => x.NextActionDue);
+            // At most one OPEN lead per person per product: repeat enquiries attach to it instead of creating noise.
+            e.HasIndex(x => new { x.ContactId, x.ProductId }).IsUnique().HasFilter("\"Status\" IN ('New','Contacted','Qualified')").HasDatabaseName("ux_lead_one_open_per_contact_product");
+            e.HasOne<Contact>().WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.Restrict);
+        });
+        b.Entity<LeadForm>(e =>
+        {
+            e.ToTable("lead_forms"); e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.PublicKey).HasMaxLength(64).IsRequired();
+            e.Property(x => x.ConsentText).HasMaxLength(1000);
+            e.Property(x => x.OwnerPool).HasMaxLength(2000);
+            e.HasIndex(x => x.PublicKey).IsUnique();
+            e.HasIndex(x => x.ProductId);
+        });
+        b.Entity<ScoreRule>(e =>
+        {
+            e.ToTable("score_rules"); e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Field).HasConversion<string>().HasMaxLength(24);
+            e.Property(x => x.Value).HasMaxLength(200);
         });
         b.Entity<Suppression>(e =>
         {

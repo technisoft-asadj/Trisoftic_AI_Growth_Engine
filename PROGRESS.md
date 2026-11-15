@@ -32,8 +32,8 @@ Tests: 17 unit + 7 architecture + 35 integration (real Postgres via Testcontaine
 | 2.B1 | Consent: append-only history, evidence required for grants, address-level suppression list, `IContactPolicy` as the single "may we message this person?" gate (also honours the Messaging pause switch and merged contacts) | Done |
 | 2.B2 | Companies, contacts (multiple emails/phones, tags, product/campaign links, interaction timeline), search and segmentation (text, tag, product, campaign, company, source, owner, "has marketing consent on channel"), product-scoped visibility | Done. Saved segments not built (filters are query parameters) |
 | 2.B3 | Duplicate guard (unique normalized email/phone), duplicate suggestions, merge with full history move and tombstone | Done. **No undo** for merges (audited, source row kept as tombstone) |
-| 2.B4 | Lead capture (public form endpoint with honeypot + rate limit + consent text, CSV import with dry-run) | **Next** |
-| 2.B5 | Lead assignment, qualification, configurable score, follow-up dates | Next |
+| 2.B4 | Lead capture: anonymous public form (honeypot, 20/min per form+IP rate limit, 32 KB cap, CORS for embedding, exact consent wording stored as evidence), CSV import with dry-run and row-level errors (never assumes consent) | Done |
+| 2.B5 | Round-robin or manual assignment, status workflow with required notes/reasons, configurable explainable score rules, follow-up dates and overdue filter | Done |
 | 2.B6 | Pipelines, opportunities, stage audit, board | Next |
 | 2.B7 | Lead-to-pipeline dashboard (missing data shown as missing, not zero) | Next |
 

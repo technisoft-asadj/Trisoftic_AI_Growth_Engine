@@ -106,6 +106,7 @@ public static class PlatformRegistration
         app.MapStrategyEndpoints();
         app.MapContentEndpoints();
         app.MapCrmEndpoints();
+        app.MapLeadEndpoints();
         return app;
     }
 }
