@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Testcontainers.PostgreSql;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
+using TriSoftic.GrowthEngine.Modules.Ai;
 
 namespace TriSoftic.GrowthEngine.Tests.Integration;
 
@@ -37,6 +38,8 @@ public sealed class TestHost : WebApplicationFactory<Program>, IAsyncLifetime
             s.AddSingleton<FakeClock>();
             s.AddSingleton<IClock>(sp => sp.GetRequiredService<FakeClock>());
             s.AddScoped<IJobHandler, TestJobHandler>();
+            s.RemoveAll<IAiProvider>();
+            s.AddSingleton<IAiProvider, FakeAiProvider>();
         });
     }
 

@@ -10,6 +10,9 @@
     <Project Path="src/Host.Worker/TriSoftic.GrowthEngine.Host.Worker.csproj" />
   </Folder>
   <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/Ai/">
+    <Project Path="src/Modules/Ai/TriSoftic.GrowthEngine.Modules.Ai.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Governance/">
     <Project Path="src/Modules/Governance/TriSoftic.GrowthEngine.Modules.Governance.csproj" />
   </Folder>

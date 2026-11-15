@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog.Context;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
+using TriSoftic.GrowthEngine.Modules.Ai;
 using TriSoftic.GrowthEngine.Modules.Governance.Persistence;
 using TriSoftic.GrowthEngine.Modules.Identity;
 using TriSoftic.GrowthEngine.Modules.Identity.Persistence;
@@ -69,6 +70,7 @@ public static class ModuleContexts
         typeof(IdentityModuleDbContext),
         typeof(JobsDbContext),
         typeof(PortfolioDbContext),
+        typeof(AiDbContext),
     ];
 }
 
@@ -79,6 +81,7 @@ public static class PlatformRegistration
     {
         s.AddJobsModule(c, runWorker: false);
         s.AddPortfolioModule(c);
+        s.AddAiModule(c);
         return s;
     }
 
@@ -86,6 +89,7 @@ public static class PlatformRegistration
     {
         app.MapJobsEndpoints();
         app.MapPortfolioEndpoints();
+        app.MapAiEndpoints();
         return app;
     }
 }

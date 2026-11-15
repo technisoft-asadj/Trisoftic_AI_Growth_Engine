@@ -14,6 +14,7 @@ public static class PortfolioModule
     {
         s.AddModuleDbContext<PortfolioDbContext>(c, PortfolioDbContext.Schema);
         s.AddScoped<IApprovalSubjectHandler, ProfileApprovalHandler>();
+        s.AddScoped<IProductKnowledge, ProductKnowledge>();
         return s;
     }
 
