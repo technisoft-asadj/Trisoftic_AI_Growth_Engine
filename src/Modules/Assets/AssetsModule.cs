@@ -22,10 +22,11 @@ public static class AssetsModule
     }
 
     public sealed record AssetDto(Guid Id, Guid ProductId, Guid GroupId, int Version, string Name, AssetKind Kind, string ContentType, long SizeBytes, string Sha256,
-        AssetSource Source, string? OwnerName, UsageRights Rights, string? RightsNotes, DateTimeOffset? RightsExpiresAt, bool IsSynthetic, bool IsRetired, DateTimeOffset CreatedAt);
+        AssetSource Source, string? OwnerName, UsageRights Rights, string? RightsNotes, DateTimeOffset? RightsExpiresAt, bool IsSynthetic, bool IsRetired, DateTimeOffset CreatedAt,
+        double? DurationSeconds = null, int? Width = null, int? Height = null);
 
     private static AssetDto ToDto(Asset a) => new(a.Id, a.ProductId, a.GroupId, a.Version, a.Name, a.Kind, a.ContentType, a.SizeBytes, a.Sha256, a.Source, a.OwnerName,
-        a.Rights, a.RightsNotes, a.RightsExpiresAt, a.IsSynthetic, a.IsRetired, a.CreatedAt);
+        a.Rights, a.RightsNotes, a.RightsExpiresAt, a.IsSynthetic, a.IsRetired, a.CreatedAt, a.DurationSeconds, a.Width, a.Height);
 
     public static IEndpointRouteBuilder MapAssetsEndpoints(this IEndpointRouteBuilder app)
     {
@@ -146,6 +147,11 @@ public static class AssetsModule
             SizeBytes = file.Length, Sha256 = sha, StorageKey = key, Source = form.Source, OwnerName = form.Owner, Rights = form.Rights, RightsNotes = form.Notes,
             RightsExpiresAt = form.Expires, IsSynthetic = form.Synthetic, UploadedBy = u.UserId, CreatedAt = clock.UtcNow,
         };
+        if (rule.ContentType == "video/mp4")
+        {
+            input.Position = 0;
+            if (Mp4Probe.Read(input) is { } probed) { asset.DurationSeconds = Math.Round(probed.DurationSeconds, 2); asset.Width = probed.Width; asset.Height = probed.Height; }
+        }
         db.Assets.Add(asset);
         try { await db.SaveChangesAsync(ct); }
         catch { await storage.DeleteAsync(key, CancellationToken.None); throw; }   // don't orphan the object if the row fails
@@ -158,7 +164,7 @@ public sealed class AssetCatalog(AssetsDbContext db, IObjectStorage storage) : I
 {
     public async Task<IReadOnlyList<AssetInfo>> GetAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct = default)
         => await db.Assets.AsNoTracking().Where(a => ids.Contains(a.Id))
-            .Select(a => new AssetInfo(a.Id, a.ProductId, a.Name, a.ContentType, a.SizeBytes, a.IsRetired, a.Rights.ToString(), a.RightsExpiresAt, a.IsSynthetic)).ToListAsync(ct);
+            .Select(a => new AssetInfo(a.Id, a.ProductId, a.Name, a.ContentType, a.SizeBytes, a.IsRetired, a.Rights.ToString(), a.RightsExpiresAt, a.IsSynthetic, a.DurationSeconds, a.Width, a.Height)).ToListAsync(ct);
 
     public async Task<Stream?> OpenAsync(Guid id, CancellationToken ct = default)
     {

@@ -28,6 +28,10 @@ public sealed class Asset : IOrganizationScoped
     public DateTimeOffset? RightsExpiresAt { get; set; }
     /// <summary>True when the file is generated/mocked and must never be presented as authentic UI or gameplay (PRD 5.6).</summary>
     public bool IsSynthetic { get; set; }
+    /// <summary>Read from the file when it was uploaded (MP4 only). Null means "could not be read", never zero.</summary>
+    public double? DurationSeconds { get; set; }
+    public int? Width { get; set; }
+    public int? Height { get; set; }
     public bool IsRetired { get; set; }
     public Guid? UploadedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

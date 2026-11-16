@@ -69,7 +69,7 @@ public sealed class SandboxPublisher : IChannelPublisher
 
     public string Provider => "sandbox";
     public int MaxTextLength => 5000;
-    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post", "Story"];
+    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post", "Story", "Reel"];
 
     public Task<PostResult> PublishAsync(PostRequest r, CancellationToken ct)
     {
@@ -108,7 +108,7 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
     // ---- IChannelPublisher ----
     public string Provider => "facebook-page";
     public int MaxTextLength => 60000;
-    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post", "Story"];   // text, photos, one video, and photo stories
+    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post", "Story", "Reel"];   // text, photos, one video, photo and video stories, reels
 
     // ---- OAuth ----
     public string AuthorizeUrl(string state)
