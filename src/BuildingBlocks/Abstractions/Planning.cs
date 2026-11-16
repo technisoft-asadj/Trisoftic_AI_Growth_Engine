@@ -13,7 +13,7 @@ public interface IContentDrafter
     Task<Result<DraftedContent>> DraftPostAsync(Guid productId, string brief, string? channel, string? language, CancellationToken ct = default);
 }
 
-public sealed record NewContent(Guid ProductId, string Title, string Channel, string Format, string? Language, string Body, Guid? SourceDraftId);
+public sealed record NewContent(Guid ProductId, string Title, string Channel, string Format, string? Language, string Body, Guid? SourceDraftId, IReadOnlyList<Guid>? AssetIds = null);
 
 public sealed record ContentStatusInfo(Guid ItemId, string Title, string Status, int CurrentVersion, int? ApprovedVersion, DateTimeOffset? ScheduledFor);
 

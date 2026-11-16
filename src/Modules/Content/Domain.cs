@@ -160,6 +160,10 @@ public sealed class ContentVersion : IOrganizationScoped
     public string? Note { get; set; }
     /// <summary>Server-verified link to the AI draft this text started from.</summary>
     public Guid? SourceDraftId { get; set; }
+    /// <summary>The files attached to this exact version (JSON array of asset ids). Approval of a version covers these files and no others.</summary>
+    public string AssetIdsJson { get; set; } = "[]";
+    public IReadOnlyList<Guid> AssetIds => System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(AssetIdsJson) ?? [];
+    public static string ToJson(IEnumerable<Guid> ids) => System.Text.Json.JsonSerializer.Serialize(ids.Distinct().ToList());
     public Guid? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
@@ -207,6 +211,8 @@ public sealed class ContentDbContext(DbContextOptions<ContentDbContext> options)
             e.ToTable("versions"); e.HasKey(x => x.Id);
             e.Property(x => x.Title).HasMaxLength(300);
             e.Property(x => x.Body).HasMaxLength(60000);
+            e.Property(x => x.AssetIdsJson).HasColumnType("jsonb");
+            e.Ignore(x => x.AssetIds);
             e.Property(x => x.Note).HasMaxLength(1000);
             e.HasIndex(x => new { x.ContentItemId, x.Number }).IsUnique();
             e.HasOne<ContentItem>().WithMany().HasForeignKey(x => x.ContentItemId).OnDelete(DeleteBehavior.Cascade);

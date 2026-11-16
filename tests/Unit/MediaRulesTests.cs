@@ -1,0 +1,60 @@
+using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
+
+namespace TriSoftic.GrowthEngine.Tests.Unit;
+
+public sealed class MediaRulesTests
+{
+    private static readonly Guid Product = Guid.NewGuid();
+    private static readonly DateTimeOffset Now = new(2026, 11, 16, 12, 0, 0, TimeSpan.Zero);
+
+    private static AssetInfo Img(string name = "a.png", string rights = "Unrestricted", bool retired = false, DateTimeOffset? expires = null, Guid? product = null)
+        => new(Guid.NewGuid(), product ?? Product, name, "image/png", 1000, retired, rights, expires, false);
+    private static AssetInfo Vid(string name = "v.mp4") => new(Guid.NewGuid(), Product, name, "video/mp4", 5_000_000, false, "Unrestricted", null, false);
+    private static AssetInfo Pdf() => new(Guid.NewGuid(), Product, "x.pdf", "application/pdf", 10, false, "Unrestricted", null, false);
+    private static List<string> V(string format, bool complete, params AssetInfo[] a) => MediaRules.Validate(format, a, Product, Now, complete);
+
+    [Fact]
+    public void A_text_post_a_photo_post_and_a_video_post_are_all_fine()
+    {
+        Assert.Empty(V("Post", true));
+        Assert.Empty(V("Post", true, Img()));
+        Assert.Empty(V("Post", true, Enumerable.Range(0, 10).Select(i => Img($"{i}.png")).ToArray()));
+        Assert.Empty(V("Post", true, Vid()));
+    }
+
+    [Fact]
+    public void A_post_cannot_mix_images_and_video_or_carry_too_many_files_or_other_types()
+    {
+        Assert.Contains(V("Post", true, Img(), Vid()), e => e.Contains("not both"));
+        Assert.Contains(V("Post", true, Enumerable.Range(0, 11).Select(i => Img($"{i}.png")).ToArray()), e => e.Contains("at most 10"));
+        Assert.Contains(V("Post", true, Vid("a.mp4"), Vid("b.mp4")), e => e.Contains("only one video"));
+        Assert.Contains(V("Post", true, Pdf()), e => e.Contains("Only images and videos"));
+    }
+
+    [Fact]
+    public void A_story_needs_exactly_one_image_by_the_time_it_is_submitted_but_may_start_without_one()
+    {
+        Assert.Empty(V("Story", true, Img()));
+        Assert.Empty(V("Story", false));                                                                  // still being put together
+        Assert.Contains(V("Story", true), e => e.Contains("exactly one image"));                          // submitted without one
+        Assert.Contains(V("Story", false, Img(), Img("b.png")), e => e.Contains("exactly one image"));    // two is wrong even in draft
+        Assert.Contains(V("Story", false, Vid()), e => e.Contains("Video stories are not supported"));
+    }
+
+    [Fact]
+    public void Other_formats_carry_no_media()
+    {
+        Assert.Empty(V("Blog", true));
+        Assert.Contains(V("Blog", true, Img()), e => e.Contains("cannot carry"));
+    }
+
+    [Fact]
+    public void Files_that_may_not_be_published_are_refused()
+    {
+        Assert.Contains(V("Post", true, Img("secret.png", rights: "InternalOnly")), e => e.Contains("internal-only"));
+        Assert.Contains(V("Post", true, Img("old.png", retired: true)), e => e.Contains("retired"));
+        Assert.Contains(V("Post", true, Img("licensed.png", rights: "LicensedWithLimits", expires: Now.AddDays(-1))), e => e.Contains("expired"));
+        Assert.Empty(V("Post", true, Img("licensed.png", rights: "LicensedWithLimits", expires: Now.AddDays(30))));
+        Assert.Contains(V("Post", true, Img("other.png", product: Guid.NewGuid())), e => e.Contains("another product"));
+    }
+}

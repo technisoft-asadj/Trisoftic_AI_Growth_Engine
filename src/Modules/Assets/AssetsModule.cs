@@ -17,6 +17,7 @@ public static class AssetsModule
     {
         s.AddModuleDbContext<AssetsDbContext>(c, AssetsDbContext.Schema);
         s.AddSingleton<IObjectStorage, FileSystemObjectStorage>();
+        s.AddScoped<IAssetCatalog, AssetCatalog>();
         return s;
     }
 
@@ -149,5 +150,19 @@ public static class AssetsModule
         try { await db.SaveChangesAsync(ct); }
         catch { await storage.DeleteAsync(key, CancellationToken.None); throw; }   // don't orphan the object if the row fails
         return (asset, null);
+    }
+}
+
+/// <summary>The assets module's side of the media contract: facts about a file, and its bytes, for content and publishing.</summary>
+public sealed class AssetCatalog(AssetsDbContext db, IObjectStorage storage) : IAssetCatalog
+{
+    public async Task<IReadOnlyList<AssetInfo>> GetAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct = default)
+        => await db.Assets.AsNoTracking().Where(a => ids.Contains(a.Id))
+            .Select(a => new AssetInfo(a.Id, a.ProductId, a.Name, a.ContentType, a.SizeBytes, a.IsRetired, a.Rights.ToString(), a.RightsExpiresAt, a.IsSynthetic)).ToListAsync(ct);
+
+    public async Task<Stream?> OpenAsync(Guid id, CancellationToken ct = default)
+    {
+        var key = await db.Assets.AsNoTracking().Where(a => a.Id == id).Select(a => a.StorageKey).FirstOrDefaultAsync(ct);
+        return key is null ? null : await storage.OpenReadAsync(key, ct);
     }
 }

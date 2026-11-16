@@ -2,6 +2,7 @@ using Serilog;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 using TriSoftic.GrowthEngine.BuildingBlocks.Security;
 using TriSoftic.GrowthEngine.Modules.Analytics;
+using TriSoftic.GrowthEngine.Modules.Assets;
 using TriSoftic.GrowthEngine.Modules.Automation;
 using TriSoftic.GrowthEngine.Modules.Budget;
 using TriSoftic.GrowthEngine.Modules.Content;
@@ -27,6 +28,7 @@ builder.Services.AddJobsModule(builder.Configuration, runWorker: true);
 builder.Services.AddCrmModule(builder.Configuration);
 builder.Services.AddSchedulingModule(builder.Configuration);
 builder.Services.AddAutomationModule(builder.Configuration, runScheduler: true);
+builder.Services.AddAssetsModule(builder.Configuration);   // publishing reads the files a post carries (same objects volume as the api)
 builder.Services.AddContentModule(builder.Configuration);
 builder.Services.AddPublishingModule(builder.Configuration, runScheduler: true);
 builder.Services.AddMessagingModule(builder.Configuration);

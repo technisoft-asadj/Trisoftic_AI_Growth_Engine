@@ -16,7 +16,7 @@ public sealed class ContentPublishSource(ContentDbContext db, IClock clock) : IC
         var item = await db.Items.AsNoTracking().FirstOrDefaultAsync(i => i.Id == itemId, ct);
         if (item is null) return null;
         var v = await db.Versions.AsNoTracking().FirstOrDefaultAsync(x => x.ContentItemId == itemId && x.Number == version, ct);
-        return v is null ? null : new PublishableContent(item.Id, item.ProductId, item.Channel, item.Format, v.Title, v.Body, version, item.CurrentVersion, item.ApprovedVersion, item.Status.ToString());
+        return v is null ? null : new PublishableContent(item.Id, item.ProductId, item.Channel, item.Format, v.Title, v.Body, version, item.CurrentVersion, item.ApprovedVersion, item.Status.ToString(), v.AssetIds);
     }
 
     private async Task<StateChange> ChangeAsync(Guid itemId, Action<ContentItem> change, CancellationToken ct)

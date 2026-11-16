@@ -13,7 +13,7 @@ namespace TriSoftic.GrowthEngine.Modules.Content;
 
 public static class ContentModule
 {
-    public static readonly string[] Formats = ["Post", "Carousel", "Script", "Storyboard", "CreativeBrief", "ImagePrompt", "DemoScript", "Blog", "SeoDraft", "LandingCopy", "AdVariant", "Email"];
+    public static readonly string[] Formats = ["Post", "Carousel", "Script", "Storyboard", "CreativeBrief", "ImagePrompt", "DemoScript", "Blog", "SeoDraft", "LandingCopy", "AdVariant", "Email", "Story"];
 
     public static IServiceCollection AddContentModule(this IServiceCollection s, IConfiguration c)
     {
@@ -26,8 +26,8 @@ public static class ContentModule
 
     public sealed record CampaignRequest(string Name, string? Objective, string? Audience, string? Market, string? Channels, string? DestinationUrl, string? TrackingNotes,
         decimal? BudgetUsd, DateOnly? StartDate, DateOnly? EndDate, string? SuccessThresholds);
-    public sealed record CreateContentRequest(string Title, string Channel, string? Format, string? Language, string Body, Guid? CampaignId, Guid? SourceDraftId);
-    public sealed record SaveVersionRequest(string? Title, string Body, string? Note, int BaseVersion);
+    public sealed record CreateContentRequest(string Title, string Channel, string? Format, string? Language, string Body, Guid? CampaignId, Guid? SourceDraftId, List<Guid>? AssetIds = null);
+    public sealed record SaveVersionRequest(string? Title, string Body, string? Note, int BaseVersion, List<Guid>? AssetIds = null);
     public sealed record ScheduleRequest(DateTimeOffset At);
 
     private static object Dto(ContentItem i) => new { i.Id, i.ProductId, i.CampaignId, i.Title, i.Channel, i.Format, i.Language, i.CurrentVersion, i.ApprovedVersion, i.Status, i.ScheduledFor, i.UpdatedAt };
@@ -40,6 +40,17 @@ public static class ContentModule
     }
 
     private static IResult Illegal(IllegalTransitionException ex) => Results.Problem(statusCode: 409, title: ex.Message);
+
+    /// <summary>Checks the files a version wants to carry against the shared media rules. Returns the distinct ids, or the reasons they are refused.</summary>
+    private static async Task<(List<Guid> Ids, List<string> Errors)> ResolveMediaAsync(IAssetCatalog assets, string format, Guid productId, IEnumerable<Guid>? requested, DateTimeOffset now, CancellationToken ct, bool complete = false)
+    {
+        var ids = (requested ?? []).Distinct().ToList();
+        if (ids.Count == 0) return (ids, MediaRules.Validate(format, [], productId, now, complete));
+        var found = await assets.GetAsync(ids, ct);
+        var errors = ids.Where(i => found.All(f => f.Id != i)).Select(i => "An attached file was not found.").Distinct().ToList();
+        errors.AddRange(MediaRules.Validate(format, found, productId, now, complete));
+        return (ids, errors);
+    }
 
     public static IEndpointRouteBuilder MapContentEndpoints(this IEndpointRouteBuilder app)
     {
@@ -72,7 +83,7 @@ public static class ContentModule
             return Results.Ok((await q.OrderBy(i => i.ScheduledFor).ToListAsync(ct)).Select(Dto));
         });
 
-        g.MapPost("/products/{productId:guid}/content", async (Guid productId, CreateContentRequest req, ContentDbContext db, ICurrentUser u, IAiDraftLookup drafts, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/products/{productId:guid}/content", async (Guid productId, CreateContentRequest req, ContentDbContext db, ICurrentUser u, IAiDraftLookup drafts, IAssetCatalog assets, IClock clock, IAuditWriter audit, CancellationToken ct) =>
         {
             if (!u.HasPermission(Permissions.ContentWrite) || !await u.CanAccessProductAsync(productId, ct)) return Results.NotFound();
             if (string.IsNullOrWhiteSpace(req.Title) || req.Title.Length > 300) return Results.Problem(statusCode: 400, title: "A title (max 300 characters) is required");
@@ -82,6 +93,9 @@ public static class ContentModule
             var body = req.Body ?? "";
             if (body.Length > 60000) return Results.Problem(statusCode: 400, title: "The body is too long");
             if (req.CampaignId is { } cid && !await db.Campaigns.AnyAsync(c => c.Id == cid && c.ProductId == productId, ct)) return Results.Problem(statusCode: 400, title: "Campaign not found for this product");
+
+            var (mediaIds, mediaErrors) = await ResolveMediaAsync(assets, format, productId, req.AssetIds, clock.UtcNow, ct);
+            if (mediaErrors.Count > 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["media"] = [.. mediaErrors] });
 
             Guid? source = null;
             if (req.SourceDraftId is { } did)
@@ -95,21 +109,22 @@ public static class ContentModule
             var now = clock.UtcNow;
             var item = new ContentItem { ProductId = productId, CampaignId = req.CampaignId, Title = req.Title.Trim(), Channel = req.Channel.Trim(), Format = format, Language = req.Language, CurrentVersion = 1, CreatedBy = u.UserId, CreatedAt = now, UpdatedAt = now };
             db.Items.Add(item);
-            db.Versions.Add(new ContentVersion { ContentItemId = item.Id, Number = 1, Title = item.Title, Body = body, Note = source is null ? "Created" : "Created from AI draft", SourceDraftId = source, CreatedBy = u.UserId, CreatedAt = now });
+            db.Versions.Add(new ContentVersion { ContentItemId = item.Id, Number = 1, Title = item.Title, Body = body, Note = source is null ? "Created" : "Created from AI draft", SourceDraftId = source, AssetIdsJson = ContentVersion.ToJson(mediaIds), CreatedBy = u.UserId, CreatedAt = now });
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry("content.created", "ContentItem", item.Id.ToString(), productId, item.Title, After: new { item.Channel, item.Format, SourceDraftId = source }), ct);
             return Results.Created($"/api/v1/content/{item.Id}", Dto(item));
         });
 
-        g.MapGet("/content/{id:guid}", async (Guid id, ContentDbContext db, ICurrentUser u, CancellationToken ct) =>
+        g.MapGet("/content/{id:guid}", async (Guid id, ContentDbContext db, ICurrentUser u, IAssetCatalog assets, CancellationToken ct) =>
         {
             var i = await Load(db, u, id, null, ct);
             if (i is null) return Results.NotFound();
             var versions = await db.Versions.AsNoTracking().Where(v => v.ContentItemId == id).OrderByDescending(v => v.Number).ToListAsync(ct);
             var cur = versions.First(v => v.Number == i.CurrentVersion);
+            var attached = cur.AssetIds.Count == 0 ? [] : await assets.GetAsync(cur.AssetIds, ct);
             return Results.Ok(new
             {
-                item = Dto(i), current = new { cur.Number, cur.Title, cur.Body, cur.Note, cur.SourceDraftId },
+                item = Dto(i), current = new { cur.Number, cur.Title, cur.Body, cur.Note, cur.SourceDraftId, assetIds = cur.AssetIds, media = attached.Select(a => new { a.Id, a.Name, a.ContentType, a.SizeBytes, a.IsRetired }) },
                 versions = versions.Select(v => new { v.Number, v.Title, v.Note, v.SourceDraftId, v.CreatedBy, v.CreatedAt, approved = i.ApprovedVersion == v.Number }),
             });
         });
@@ -121,7 +136,7 @@ public static class ContentModule
             return v is null ? Results.NotFound() : Results.Ok(new { v.Number, v.Title, v.Body, v.Note, v.SourceDraftId, v.CreatedAt });
         });
 
-        g.MapPost("/content/{id:guid}/versions", async (Guid id, SaveVersionRequest req, ContentDbContext db, ICurrentUser u, IApprovalService approvals, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/content/{id:guid}/versions", async (Guid id, SaveVersionRequest req, ContentDbContext db, ICurrentUser u, IApprovalService approvals, IAssetCatalog assets, IClock clock, IAuditWriter audit, CancellationToken ct) =>
         {
             var i = await Load(db, u, id, Permissions.ContentWrite, ct);
             if (i is null) return Results.NotFound();
@@ -130,12 +145,17 @@ public static class ContentModule
             if (i.Status == ContentStatus.Cancelled) return Results.Problem(statusCode: 409, title: "Cancelled content cannot be edited");
             if (i.Status == ContentStatus.Publishing) return Results.Problem(statusCode: 409, title: "This content is being published right now; edit it once publishing finishes");
 
+            // Files: what the request names, or - when it names none - whatever the current version already carried.
+            var previous = (await db.Versions.AsNoTracking().FirstAsync(v => v.ContentItemId == id && v.Number == i.CurrentVersion, ct)).AssetIds;
+            var (mediaIds, mediaErrors) = await ResolveMediaAsync(assets, i.Format, i.ProductId, req.AssetIds ?? [.. previous], clock.UtcNow, ct);
+            if (mediaErrors.Count > 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["media"] = [.. mediaErrors] });
+
             var wasInReview = i.Status == ContentStatus.InReview;
             var wasScheduled = i.Status == ContentStatus.Scheduled;
             var next = i.CurrentVersion + 1;
             i.AddVersion(next); i.UpdatedAt = clock.UtcNow;
             if (!string.IsNullOrWhiteSpace(req.Title)) i.Title = req.Title.Trim();
-            db.Versions.Add(new ContentVersion { ContentItemId = id, Number = next, Title = i.Title, Body = req.Body ?? "", Note = req.Note, CreatedBy = u.UserId, CreatedAt = clock.UtcNow });
+            db.Versions.Add(new ContentVersion { ContentItemId = id, Number = next, Title = i.Title, Body = req.Body ?? "", Note = req.Note, AssetIdsJson = ContentVersion.ToJson(mediaIds), CreatedBy = u.UserId, CreatedAt = clock.UtcNow });
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return Results.Problem(statusCode: 409, title: "Concurrent save detected. Reload and try again."); }
             if (wasInReview) await approvals.WithdrawAsync(ContentApprovalHandler.Subject, id.ToString(), ct);   // the pending request was for the old version
@@ -144,12 +164,14 @@ public static class ContentModule
             return Results.Ok(Dto(i));
         });
 
-        g.MapPost("/content/{id:guid}/submit", async (Guid id, ContentDbContext db, ICurrentUser u, IApprovalService approvals, IClock clock, CancellationToken ct) =>
+        g.MapPost("/content/{id:guid}/submit", async (Guid id, ContentDbContext db, ICurrentUser u, IApprovalService approvals, IAssetCatalog assets, IClock clock, CancellationToken ct) =>
         {
             var i = await Load(db, u, id, Permissions.ContentWrite, ct);
             if (i is null) return Results.NotFound();
-            var body = await db.Versions.AsNoTracking().Where(v => v.ContentItemId == id && v.Number == i.CurrentVersion).Select(v => v.Body).FirstAsync(ct);
-            if (string.IsNullOrWhiteSpace(body)) return Results.Problem(statusCode: 400, title: "Add some content before submitting for approval");
+            var cur = await db.Versions.AsNoTracking().FirstAsync(v => v.ContentItemId == id && v.Number == i.CurrentVersion, ct);
+            if (string.IsNullOrWhiteSpace(cur.Body) && i.Format != "Story") return Results.Problem(statusCode: 400, title: "Add some content before submitting for approval");
+            var (_, mediaErrors) = await ResolveMediaAsync(assets, i.Format, i.ProductId, cur.AssetIds, clock.UtcNow, ct, complete: true);
+            if (mediaErrors.Count > 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["media"] = [.. mediaErrors] });
             try { i.Submit(); } catch (IllegalTransitionException ex) { return Illegal(ex); }
             i.UpdatedAt = clock.UtcNow;
             await db.SaveChangesAsync(ct);

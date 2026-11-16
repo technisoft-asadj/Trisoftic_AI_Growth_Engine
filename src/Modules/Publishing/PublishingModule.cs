@@ -29,6 +29,7 @@ public static class PublishingModule
         var dp = s.AddDataProtection().SetApplicationName("TriSoftic.GrowthEngine");
         if (c["DataProtection:KeysPath"] is { Length: > 0 } keys) dp.PersistKeysToFileSystem(new DirectoryInfo(keys));
         s.AddHttpClient("facebook", h => h.Timeout = TimeSpan.FromSeconds(30)).RemoveAllLoggers();   // request URLs can carry access tokens, so they are not logged
+        s.AddHttpClient("facebook-upload", h => h.Timeout = TimeSpan.FromMinutes(15)).RemoveAllLoggers();   // photos and videos are slow to upload
         s.AddScoped<TokenVault>();
         s.AddScoped<FacebookGraph>();
         s.AddScoped<IFacebookGraph>(sp => sp.GetRequiredService<FacebookGraph>());

@@ -20,7 +20,13 @@ public sealed class PublishException(PublishErrorKind kind, string message, Time
     public TimeSpan? RetryAfter { get; } = retryAfter;
 }
 
-public sealed record PostRequest(string ExternalId, string AccessToken, string Text);
+/// <summary>One file to send with a post. The bytes are opened only when needed and disposed by the caller of <see cref="Open"/>, so a large video is streamed rather than held in memory.</summary>
+public sealed record MediaFile(string FileName, string ContentType, long Size, Func<CancellationToken, Task<Stream>> Open)
+{
+    public bool IsVideo => ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
+}
+
+public sealed record PostRequest(string ExternalId, string AccessToken, string Text, IReadOnlyList<MediaFile>? Media = null, string Format = "Post");
 public sealed record PostResult(string ProviderPostId, string? Url);
 public sealed record PageInfo(string Id, string Name, string AccessToken);
 
@@ -63,7 +69,7 @@ public sealed class SandboxPublisher : IChannelPublisher
 
     public string Provider => "sandbox";
     public int MaxTextLength => 5000;
-    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post"];
+    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post", "Story"];
 
     public Task<PostResult> PublishAsync(PostRequest r, CancellationToken ct)
     {
@@ -102,7 +108,7 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
     // ---- IChannelPublisher ----
     public string Provider => "facebook-page";
     public int MaxTextLength => 60000;
-    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post"];   // text posts only; images/video need media upload, which is not built yet
+    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post", "Story"];   // text, photos, one video, and photo stories
 
     // ---- OAuth ----
     public string AuthorizeUrl(string state)
@@ -124,19 +130,77 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
     }
 
     // ---- publishing ----
+    // Text goes to /feed. One photo goes to /photos (published, with the text as its caption). Several photos are uploaded unpublished and then attached to one /feed post.
+    // A video goes to /videos (the text is its description). A story uploads one unpublished photo and then turns it into a Page photo story.
     public async Task<PostResult> PublishAsync(PostRequest r, CancellationToken ct)
     {
-        var form = new FormUrlEncodedContent(new Dictionary<string, string> { ["message"] = r.Text, ["access_token"] = r.AccessToken });
-        var res = await Send(() => http.CreateClient("facebook").PostAsync($"{Base}/{r.ExternalId}/feed", form, ct), ct);
-        var id = res.GetProperty("id").GetString() ?? throw new PublishException(PublishErrorKind.Unknown, "Facebook accepted the request but returned no post id");
+        var media = r.Media ?? [];
+        var page = r.ExternalId;
+        string id;
+        if (r.Format == "Story")
+        {
+            if (media.Count != 1 || media[0].IsVideo) throw new PublishException(PublishErrorKind.Permanent, "A story needs exactly one image.");
+            var photoId = (await UploadPhoto(page, r.AccessToken, media[0], null, published: false, ct)).Id;
+            var res = await Send(() => http.CreateClient("facebook").PostAsync($"{Base}/{page}/photo_stories", new FormUrlEncodedContent(new Dictionary<string, string> { ["photo_id"] = photoId, ["access_token"] = r.AccessToken }), ct), ct);
+            id = res.TryGetProperty("post_id", out var pid) ? pid.GetString() ?? photoId : photoId;
+        }
+        else if (media.Count == 0)
+        {
+            var form = new FormUrlEncodedContent(new Dictionary<string, string> { ["message"] = r.Text, ["access_token"] = r.AccessToken });
+            var res = await Send(() => http.CreateClient("facebook").PostAsync($"{Base}/{page}/feed", form, ct), ct);
+            id = res.GetProperty("id").GetString() ?? throw new PublishException(PublishErrorKind.Unknown, "Facebook accepted the request but returned no post id");
+        }
+        else if (media.Count == 1 && media[0].IsVideo)
+        {
+            var res = await PostMultipart($"{Base}/{page}/videos", new() { ["description"] = r.Text, ["access_token"] = r.AccessToken }, media[0], "source", ct);
+            id = res.GetProperty("id").GetString() ?? throw new PublishException(PublishErrorKind.Unknown, "Facebook accepted the video but returned no id");
+        }
+        else if (media.Count == 1)
+        {
+            var photo = await UploadPhoto(page, r.AccessToken, media[0], r.Text, published: true, ct);
+            id = photo.PostId ?? photo.Id;
+        }
+        else
+        {
+            var fields = new Dictionary<string, string> { ["message"] = r.Text, ["access_token"] = r.AccessToken };
+            for (var i = 0; i < media.Count; i++) fields[$"attached_media[{i}]"] = JsonSerializer.Serialize(new { media_fbid = (await UploadPhoto(page, r.AccessToken, media[i], null, published: false, ct)).Id });
+            var res = await Send(() => http.CreateClient("facebook").PostAsync($"{Base}/{page}/feed", new FormUrlEncodedContent(fields), ct), ct);
+            id = res.GetProperty("id").GetString() ?? throw new PublishException(PublishErrorKind.Unknown, "Facebook accepted the request but returned no post id");
+        }
+
         string? url = null;
         try { url = (await GetJson($"{Base}/{id}?fields=permalink_url&access_token={Uri.EscapeDataString(r.AccessToken)}", ct)).GetProperty("permalink_url").GetString(); }
         catch (PublishException) { /* the post exists; a missing link is not a failure */ }
         return new PostResult(id, url is null ? null : (url.StartsWith("http") ? url : "https://www.facebook.com" + url));
     }
 
+    private sealed record Uploaded(string Id, string? PostId);
+
+    private async Task<Uploaded> UploadPhoto(string page, string token, MediaFile file, string? caption, bool published, CancellationToken ct)
+    {
+        var fields = new Dictionary<string, string> { ["published"] = published ? "true" : "false", ["access_token"] = token };
+        if (!string.IsNullOrWhiteSpace(caption)) fields["caption"] = caption;
+        var res = await PostMultipart($"{Base}/{page}/photos", fields, file, "source", ct);
+        var id = res.GetProperty("id").GetString() ?? throw new PublishException(PublishErrorKind.Unknown, "Facebook accepted the photo but returned no id");
+        return new Uploaded(id, res.TryGetProperty("post_id", out var p) ? p.GetString() : null);
+    }
+
+    /// <summary>Sends one file with the given form fields. The file is streamed from storage and the request uses the long-timeout client (videos are slow).</summary>
+    private Task<JsonElement> PostMultipart(string url, Dictionary<string, string> fields, MediaFile file, string fileField, CancellationToken ct)
+        => Send(async () =>
+        {
+            await using var stream = await file.Open(ct);
+            using var form = new MultipartFormDataContent();
+            foreach (var kv in fields) form.Add(new StringContent(kv.Value), kv.Key);
+            var part = new StreamContent(stream); part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(file.ContentType);
+            form.Add(part, fileField, file.FileName);
+            return await http.CreateClient("facebook-upload").PostAsync(url, form, ct);
+        }, ct);
+
     public async Task<PostResult?> FindRecentAsync(PostRequest r, CancellationToken ct)
     {
+        // A story has no text and Facebook offers no reliable way to look one up, so after an uncertain failure it is not retried blindly: a person checks the Page.
+        if (r.Format == "Story") throw new PublishException(PublishErrorKind.Permanent, "The story may or may not have been posted and cannot be checked automatically. Look at the Page's story: if it is there use 'mark as published', otherwise retry.");
         var res = await GetJson($"{Base}/{r.ExternalId}/posts?fields=id,message,created_time,permalink_url&limit=10&access_token={Uri.EscapeDataString(r.AccessToken)}", ct);
         foreach (var p in res.GetProperty("data").EnumerateArray())
         {

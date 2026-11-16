@@ -20,7 +20,7 @@ public sealed class TokenVault(IDataProtectionProvider dp)
 /// The guarantees: only the approved current version goes out; "Published" is set only after the provider returned a post id;
 /// a retry never creates a second post (one PublishedPost per version, and an uncertain earlier attempt is checked against the provider first).
 /// </summary>
-public sealed class PublishPipeline(PublishingDbContext db, IContentPublishSource content, IEnumerable<IChannelPublisher> publishers, TokenVault vault, IClock clock, IAuditWriter audit)
+public sealed class PublishPipeline(PublishingDbContext db, IContentPublishSource content, IEnumerable<IChannelPublisher> publishers, TokenVault vault, IAssetCatalog catalog, IClock clock, IAuditWriter audit)
 {
     public const string PublishJob = "publishing.publish";
 
@@ -40,7 +40,19 @@ public sealed class PublishPipeline(PublishingDbContext db, IContentPublishSourc
         var publisher = publishers.FirstOrDefault(p => p.Provider == account.Provider);
         if (publisher is null) { await FailAsync(item, $"No adapter is available for '{account.Provider}'."); return; }
         if (!publisher.SupportedFormats.Contains(item.Format)) { await FailAsync(item, $"'{item.Format}' content cannot be published to {item.Channel} yet (supported: {string.Join(", ", publisher.SupportedFormats)})."); return; }
-        if (string.IsNullOrWhiteSpace(item.Body)) { await FailAsync(item, "The approved text is empty."); return; }
+        if (string.IsNullOrWhiteSpace(item.Body) && item.Format != "Story") { await FailAsync(item, "The approved text is empty."); return; }   // photos and videos need their caption too: it is how a retry recognises the post
+
+        // Files: checked again at the last moment (a file may have been retired or its rights may have expired since approval), then opened lazily so a video is streamed.
+        var assetIds = item.AssetIds ?? [];
+        var media = new List<MediaFile>();
+        if (assetIds.Count > 0 || item.Format == "Story")
+        {
+            var infos = assetIds.Count == 0 ? [] : await catalog.GetAsync(assetIds, ct);
+            if (assetIds.Any(i => infos.All(x => x.Id != i))) { await FailAsync(item, "An attached file no longer exists."); return; }
+            var problems = MediaRules.Validate(item.Format, infos, item.ProductId, clock.UtcNow, complete: true);
+            if (problems.Count > 0) { await FailAsync(item, "The attached files cannot be sent: " + string.Join(" ", problems)); return; }
+            media = [.. assetIds.Select(id => infos.First(x => x.Id == id)).Select(i => new MediaFile(i.Name, i.ContentType, i.SizeBytes, async c => await catalog.OpenAsync(i.Id, c) ?? throw new PublishException(PublishErrorKind.Permanent, $"The file '{i.Name}' is missing from storage.")))];
+        }
         if (item.Body.Length > publisher.MaxTextLength) { await FailAsync(item, $"The text is {item.Body.Length} characters; {item.Channel} allows {publisher.MaxTextLength}."); return; }
 
         string token;
@@ -50,7 +62,7 @@ public sealed class PublishPipeline(PublishingDbContext db, IContentPublishSourc
         var claim = await content.BeginPublishAsync(itemId, version, ct);
         if (!claim.Ok) return;   // lost a race with an edit/unschedule: leave it alone
 
-        var req = new PostRequest(account.ExternalId, token, item.Body);
+        var req = new PostRequest(account.ExternalId, token, item.Body, media, item.Format);
         var prior = await db.Attempts.Where(a => a.ContentItemId == itemId && a.Version == version).OrderByDescending(a => a.Number).FirstOrDefaultAsync(ct);
 
         // An earlier try may have reached the provider without us hearing back. Look before sending again, or a duplicate is possible.

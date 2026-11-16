@@ -184,6 +184,10 @@ namespace TriSoftic.GrowthEngine.Modules.Content.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AssetIdsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("Body")
                         .IsRequired()
                         .HasMaxLength(60000)

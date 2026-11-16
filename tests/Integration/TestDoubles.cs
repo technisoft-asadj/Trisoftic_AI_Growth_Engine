@@ -68,10 +68,20 @@ public sealed class ScriptedPublisher : TriSoftic.GrowthEngine.Modules.Publishin
 
     public string Provider => "sandbox";
     public int MaxTextLength => 400;
-    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post"];
+    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post", "Story"];
 
-    public Task<TriSoftic.GrowthEngine.Modules.Publishing.PostResult> PublishAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest r, CancellationToken ct)
+    /// <summary>What the "network" was handed for each post (keyed by its text): the format and every file, with its bytes read back from storage.</summary>
+    public static readonly ConcurrentDictionary<string, (string Format, List<(string Name, string Type, byte[] Bytes)> Files)> Sent = new();
+
+    public async Task<TriSoftic.GrowthEngine.Modules.Publishing.PostResult> PublishAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest r, CancellationToken ct)
     {
+        var files = new List<(string, string, byte[])>();
+        foreach (var m in r.Media ?? [])
+        {
+            await using var s = await m.Open(ct); using var ms = new MemoryStream(); await s.CopyToAsync(ms, ct);
+            files.Add((m.FileName, m.ContentType, ms.ToArray()));
+        }
+        Sent[r.Text] = (r.Format, files);
         Calls.AddOrUpdate(r.Text, 1, (_, n) => n + 1);
         var next = Script.TryGetValue(r.Text, out var q) && q.TryDequeue(out var b) ? b : "ok";
         var K = TriSoftic.GrowthEngine.Modules.Publishing.PublishErrorKind.Retryable;
@@ -85,7 +95,7 @@ public sealed class ScriptedPublisher : TriSoftic.GrowthEngine.Modules.Publishin
         var id = "post-" + Guid.NewGuid().ToString("N")[..10];
         Live.AddOrUpdate(r.Text, _ => [id], (_, l) => { lock (l) l.Add(id); return l; });
         if (next == "unknown-accepted") throw new TriSoftic.GrowthEngine.Modules.Publishing.PublishException(TriSoftic.GrowthEngine.Modules.Publishing.PublishErrorKind.Unknown, "timeout after the provider accepted it");
-        return Task.FromResult(new TriSoftic.GrowthEngine.Modules.Publishing.PostResult(id, "https://social.test/" + id));
+        return new TriSoftic.GrowthEngine.Modules.Publishing.PostResult(id, "https://social.test/" + id);
     }
 
     public Task<TriSoftic.GrowthEngine.Modules.Publishing.PostResult?> FindRecentAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest r, CancellationToken ct)

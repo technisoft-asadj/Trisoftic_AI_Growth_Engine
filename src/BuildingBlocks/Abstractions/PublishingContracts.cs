@@ -3,7 +3,7 @@ namespace TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 public sealed record DueContent(Guid ItemId, Guid ProductId, string Channel, int Version, DateTimeOffset ScheduledFor);
 
 /// <summary>The exact approved text of one content version, with the facts needed to decide whether it may go out.</summary>
-public sealed record PublishableContent(Guid ItemId, Guid ProductId, string Channel, string Format, string Title, string Body, int Version, int CurrentVersion, int? ApprovedVersion, string Status);
+public sealed record PublishableContent(Guid ItemId, Guid ProductId, string Channel, string Format, string Title, string Body, int Version, int CurrentVersion, int? ApprovedVersion, string Status, IReadOnlyList<Guid>? AssetIds = null);
 
 public sealed record StateChange(bool Ok, string? Error = null);
 
