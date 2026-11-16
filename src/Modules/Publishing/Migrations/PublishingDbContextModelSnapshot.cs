@@ -123,6 +123,55 @@ namespace TriSoftic.GrowthEngine.Modules.Publishing.Migrations
                     b.ToTable("pending_connections", "publishing");
                 });
 
+            modelBuilder.Entity("TriSoftic.GrowthEngine.Modules.Publishing.PostMetricSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("Clicks")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Comments")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PublishedPostId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("Reach")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("Reactions")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Shares")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("TakenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("Views")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("PublishedPostId", "TakenAt");
+
+                    b.ToTable("post_metric_snapshots", "publishing");
+                });
+
             modelBuilder.Entity("TriSoftic.GrowthEngine.Modules.Publishing.PublishedPost", b =>
                 {
                     b.Property<Guid>("Id")

@@ -93,6 +93,41 @@ public sealed class PublishingTests(TestHost host)
     }
 
     [Fact]
+    public async Task Post_figures_are_stored_per_post_and_a_figure_the_network_withheld_stays_empty_not_zero()
+    {
+        var admin = await host.LoginAdminAsync(); var approver = await UserAsync(admin, "Approver");
+        var pid = await ProductAsync(admin); await ConnectSandbox(admin, pid);
+        var (id, _) = await ScheduledAsync(admin, approver, pid);
+        Assert.Equal("Published", await WaitForAsync(admin, id, "Published"));
+        var runner = host.Services.GetRequiredService<JobRunner>();
+        async Task Pull()
+        {
+            using (var scope = host.Services.CreateScope())
+                await scope.ServiceProvider.GetRequiredService<IJobQueue>().EnqueueAsync(new JobRequest("publishing.pull-post-metrics", "{}", IdempotencyKey: "pm-" + Guid.NewGuid()));
+            for (var k = 0; k < 100 && await runner.RunOnceAsync(default); k++) { }
+        }
+        async Task<JsonElement> Row() => Assert.Single((await admin.GetFromJsonAsync<JsonElement>($"/api/v1/publishing/products/{pid}/post-metrics", Json)).EnumerateArray());
+
+        ScriptedPublisher.PostFigures = null;                                       // this adapter cannot report on posts
+        await Pull();
+        Assert.Equal(JsonValueKind.Null, (await Row()).GetProperty("reactions").ValueKind);   // nothing measured is not zero
+
+        ScriptedPublisher.PostFigures = new(Reactions: 12, Comments: 3, Shares: 0, Views: null, Reach: null, Clicks: null, Note: "Facebook did not supply views, reach, clicks (the connection may lack the read_insights permission, or the post is too new).");
+        try { await Pull(); }
+        finally { ScriptedPublisher.PostFigures = null; }
+        var row = await Row();
+        Assert.Equal(12, row.GetProperty("reactions").GetInt32()); Assert.Equal(0, row.GetProperty("shares").GetInt32());   // a real zero is kept
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("views").ValueKind);                                           // withheld: still empty
+        Assert.Contains("read_insights", row.GetProperty("note").GetString());
+
+        // The same figures reach analytics only where every figure needed is known: engagements yes, impressions no.
+        var summary = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/analytics/summary?productId={pid}&channel=facebook", Json);
+        JsonElement T(string key) => summary.GetProperty("tiles").EnumerateArray().First(t => t.GetProperty("key").GetString() == key);
+        Assert.Equal(15m, T("engagements").GetProperty("value").GetDecimal());
+        Assert.Equal("Unavailable", T("impressions").GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task A_transient_provider_failure_is_retried_and_creates_exactly_one_post()
     {
         var admin = await host.LoginAdminAsync(); var approver = await UserAsync(admin, "Approver");

@@ -39,6 +39,7 @@ public static class PublishingModule
         s.AddScoped<IJobHandler, DispatchHandler>();
         s.AddScoped<IJobHandler, TokenCheckHandler>();
         s.AddScoped<IJobHandler, PullInsightsHandler>();
+        s.AddScoped<IJobHandler, PullPostMetricsHandler>();
         if (runScheduler || c.GetValue<bool>("Jobs:RunInProcess")) s.AddHostedService<PublishingScheduler>();
         return s;
     }
@@ -125,6 +126,28 @@ public static class PublishingModule
             if (!u.HasPermission(Permissions.PublishingManage) || !await u.CanAccessProductAsync(productId, ct)) return Results.NotFound();
             return Results.Ok(await db.Posts.AsNoTracking().Where(p => p.ProductId == productId).OrderByDescending(p => p.PublishedAt).Take(100)
                 .Select(p => new { p.ContentItemId, p.Version, p.ProviderPostId, p.Url, p.Source, p.Note, p.PublishedAt }).ToListAsync(ct));
+        });
+
+        // The latest reported figures for each published post. A figure the network did not supply is null ("—" in the UI), never zero.
+        g.MapGet("/products/{productId:guid}/post-metrics", async (Guid productId, PublishingDbContext db, ICurrentUser u, CancellationToken ct) =>
+        {
+            if (!u.HasPermission(Permissions.PublishingManage) || !await u.CanAccessProductAsync(productId, ct)) return Results.NotFound();
+            var posts = await db.Posts.AsNoTracking().Where(p => p.ProductId == productId).OrderByDescending(p => p.PublishedAt).Take(100).ToListAsync(ct);
+            var ids = posts.Select(p => p.Id).ToList();
+            var snaps = await db.Snapshots.AsNoTracking().Where(s => ids.Contains(s.PublishedPostId)).ToListAsync(ct);
+            var latest = snaps.GroupBy(s => s.PublishedPostId).ToDictionary(x => x.Key, x => x.OrderByDescending(s => s.TakenAt).First());
+            return Results.Ok(posts.Select(p =>
+            {
+                latest.TryGetValue(p.Id, out var s);
+                return new { p.ContentItemId, p.Version, p.Url, p.PublishedAt, measuredAt = s?.TakenAt, s?.Reactions, s?.Comments, s?.Shares, s?.Views, s?.Reach, s?.Clicks, s?.Note };
+            }));
+        });
+
+        g.MapPost("/products/{productId:guid}/post-metrics/refresh", async (Guid productId, ICurrentUser u, IJobQueue jobs, IClock clock, CancellationToken ct) =>
+        {
+            if (!u.HasPermission(Permissions.PublishingManage) || !await u.CanAccessProductAsync(productId, ct)) return Results.NotFound();
+            await jobs.EnqueueAsync(new JobRequest(PullPostMetricsHandler.PullJob, "{}", IdempotencyKey: $"postmetrics-now:{clock.UtcNow.ToUnixTimeSeconds() / 60}"), ct);
+            return Results.Accepted();
         });
     }
 

@@ -96,6 +96,11 @@ public sealed class ScriptedPublisher : TriSoftic.GrowthEngine.Modules.Publishin
     public Task<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.InsightPoint>?> GetInsightsAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest account, DateOnly from, DateOnly to, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.InsightPoint>?>(Insights);
     public Task<bool> IsAccountValidAsync(string externalId, string accessToken, CancellationToken ct) => Task.FromResult(AccountsValid);
+
+    /// <summary>What the "network" reports for every post; null means the adapter cannot report on posts.</summary>
+    public static volatile TriSoftic.GrowthEngine.Modules.Publishing.PostMetrics? PostFigures;
+    public Task<TriSoftic.GrowthEngine.Modules.Publishing.PostMetrics?> GetPostMetricsAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest account, string providerPostId, CancellationToken ct)
+        => Task.FromResult(PostFigures);
 }
 
 /// <summary>Facebook's OAuth side, faked: one consent screen, two pages.</summary>

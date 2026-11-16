@@ -45,7 +45,16 @@ public interface IChannelPublisher
     /// in which case nothing is recorded and no freshness is claimed.
     /// </summary>
     Task<IReadOnlyList<InsightPoint>?> GetInsightsAsync(PostRequest account, DateOnly from, DateOnly to, CancellationToken ct) => Task.FromResult<IReadOnlyList<InsightPoint>?>(null);
+
+    /// <summary>
+    /// The network's own figures for one published post. A figure the network did not supply is null, never zero.
+    /// Returns null when this adapter cannot report on posts at all.
+    /// </summary>
+    Task<PostMetrics?> GetPostMetricsAsync(PostRequest account, string providerPostId, CancellationToken ct) => Task.FromResult<PostMetrics?>(null);
 }
+
+/// <summary>Figures for one post. Every field is null when the network could not provide it; <see cref="Note"/> says why.</summary>
+public sealed record PostMetrics(int? Reactions, int? Comments, int? Shares, long? Views, long? Reach, int? Clicks, string? Note);
 
 /// <summary>A pretend network for demos and tests: accepts anything, remembers what it was given. Enabled only when Publishing:AllowSandbox is true.</summary>
 public sealed class SandboxPublisher : IChannelPublisher
@@ -97,7 +106,7 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
 
     // ---- OAuth ----
     public string AuthorizeUrl(string state)
-        => $"https://www.facebook.com/{Version}/dialog/oauth?client_id={Uri.EscapeDataString(AppId)}&redirect_uri={Uri.EscapeDataString(RedirectUri)}&state={Uri.EscapeDataString(state)}&scope=pages_show_list,pages_manage_posts,pages_read_engagement";
+        => $"https://www.facebook.com/{Version}/dialog/oauth?client_id={Uri.EscapeDataString(AppId)}&redirect_uri={Uri.EscapeDataString(RedirectUri)}&state={Uri.EscapeDataString(state)}&scope=pages_show_list,pages_manage_posts,pages_read_engagement,read_insights";
 
     public async Task<string> ExchangeCodeAsync(string code, CancellationToken ct)
     {
@@ -136,6 +145,41 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
                 return new PostResult(p.GetProperty("id").GetString()!, p.TryGetProperty("permalink_url", out var u) ? u.GetString() : null);
         }
         return null;
+    }
+
+    // Engagement counts need only pages_read_engagement. Views, reach and clicks need read_insights, and Meta renames its metrics from time to time,
+    // so each is asked for separately with fallbacks: one that is refused or retired leaves that figure empty instead of failing the rest.
+    private static readonly string[] ViewMetrics = ["post_media_view", "post_impressions"];
+    private static readonly string[] ReachMetrics = ["post_total_media_view_unique", "post_impressions_unique"];
+    private static readonly string[] ClickMetrics = ["post_clicks"];
+
+    public async Task<PostMetrics?> GetPostMetricsAsync(PostRequest account, string providerPostId, CancellationToken ct)
+    {
+        var token = Uri.EscapeDataString(account.AccessToken);
+        var basic = await GetJson($"{Base}/{providerPostId}?fields=reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0),shares&access_token={token}", ct);
+        static int? Total(JsonElement e, string name) => e.TryGetProperty(name, out var o) && o.TryGetProperty("summary", out var s) && s.TryGetProperty("total_count", out var t) ? t.GetInt32() : null;
+        var reactions = Total(basic, "reactions"); var comments = Total(basic, "comments");
+        int? shares = reactions is null && comments is null ? null : (basic.TryGetProperty("shares", out var sh) && sh.TryGetProperty("count", out var c) ? c.GetInt32() : 0);   // Facebook leaves "shares" out when there are none
+
+        var missing = new List<string>();
+        async Task<long?> Insight(string label, string[] candidates)
+        {
+            foreach (var metric in candidates)
+            {
+                try
+                {
+                    var res = await GetJson($"{Base}/{providerPostId}/insights?metric={metric}&access_token={token}", ct);
+                    foreach (var row in res.GetProperty("data").EnumerateArray())
+                        if (row.TryGetProperty("values", out var vals) && vals.GetArrayLength() > 0 && vals[0].TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.Number) return v.GetInt64();
+                }
+                catch (PublishException ex) when (ex.Kind == PublishErrorKind.Permanent) { /* refused or retired metric: try the next name */ }
+            }
+            missing.Add(label);
+            return null;
+        }
+        var views = await Insight("views", ViewMetrics); var reach = await Insight("reach", ReachMetrics); var clicks = await Insight("clicks", ClickMetrics);
+        var note = missing.Count == 0 ? null : $"Facebook did not supply {string.Join(", ", missing)} (the connection may lack the read_insights permission, or the post is too new).";
+        return new PostMetrics(reactions, comments, shares, views, reach, (int?)clicks, note);
     }
 
     public async Task<bool> IsAccountValidAsync(string externalId, string accessToken, CancellationToken ct)

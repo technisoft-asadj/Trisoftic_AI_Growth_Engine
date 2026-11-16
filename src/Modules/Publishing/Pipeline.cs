@@ -193,9 +193,74 @@ public sealed class PublishingScheduler(IServiceScopeFactory scopes, IClock cloc
                 await jobs.EnqueueAsync(new JobRequest(DispatchHandler.DispatchJob, "{}", IdempotencyKey: $"dispatch:{t / 60}"), stoppingToken);
                 await jobs.EnqueueAsync(new JobRequest(TokenCheckHandler.CheckJob, "{}", IdempotencyKey: $"tokencheck:{t / 3600}"), stoppingToken);
                 await jobs.EnqueueAsync(new JobRequest(PullInsightsHandler.PullJob, "{}", IdempotencyKey: $"insights:{t / 21600}"), stoppingToken);
+                await jobs.EnqueueAsync(new JobRequest(PullPostMetricsHandler.PullJob, "{}", IdempotencyKey: $"postmetrics:{t / 10800}"), stoppingToken);   // every 3 hours
             }
             catch (Exception) when (!stoppingToken.IsCancellationRequested) { /* next minute */ }
             await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken).ConfigureAwait(false);
+        }
+    }
+}
+
+/// <summary>
+/// Asks the network how each recently published post is doing and stores a snapshot. Posts older than <see cref="WindowDays"/> are left alone.
+/// The same figures are summed into analytics per publish day (engagements, impressions, clicks), but only when every post of that day has the figure,
+/// so a missing number is never counted as zero.
+/// </summary>
+public sealed class PullPostMetricsHandler(PublishingDbContext db, IEnumerable<IChannelPublisher> publishers, TokenVault vault, IClock clock, IMetricSink? sink = null) : IJobHandler
+{
+    public const string PullJob = "publishing.pull-post-metrics";
+    public const int WindowDays = 30;
+    public string Type => PullJob;
+    public PauseScope? PauseScope => null;   // read-only
+
+    public async Task HandleAsync(JobContext c, CancellationToken ct)
+    {
+        var now = clock.UtcNow;
+        var since = now.AddDays(-WindowDays);
+        var posts = await db.Posts.Where(p => p.Source == PostSource.Provider && p.AccountId != null && p.PublishedAt >= since).ToListAsync(ct);
+        var accounts = await db.Accounts.AsNoTracking().Where(a => a.Status == AccountStatus.Connected).ToDictionaryAsync(a => a.Id, ct);
+        TransientJobException? failure = null;
+        var touchedProducts = new HashSet<Guid>();
+        foreach (var post in posts)
+        {
+            if (!accounts.TryGetValue(post.AccountId!.Value, out var account)) continue;
+            var publisher = publishers.FirstOrDefault(p => p.Provider == account.Provider);
+            if (publisher is null) continue;
+            try
+            {
+                var m = await publisher.GetPostMetricsAsync(new PostRequest(account.ExternalId, vault.Open(account.TokenCipher), ""), post.ProviderPostId, ct);
+                if (m is null) continue;   // this adapter cannot report on posts
+                db.Snapshots.Add(new PostMetricSnapshot { PublishedPostId = post.Id, ProductId = post.ProductId, TakenAt = now, Reactions = m.Reactions, Comments = m.Comments, Shares = m.Shares, Views = m.Views, Reach = m.Reach, Clicks = m.Clicks, Note = m.Note });
+                await db.SaveChangesAsync(ct);
+                touchedProducts.Add(post.ProductId);
+            }
+            catch (PublishException ex) when (ex.Kind is PublishErrorKind.Retryable or PublishErrorKind.Unknown) { failure ??= new TransientJobException($"Post figures for '{account.DisplayName}': {ex.Message}", ex.RetryAfter); }
+            catch (PublishException) { /* auth or permanent: the token check flags the account; nothing is recorded, so nothing looks fresh */ }
+            catch (System.Security.Cryptography.CryptographicException) { /* unreadable token: flagged by the token check */ }
+        }
+        if (sink is not null) foreach (var productId in touchedProducts) await RollUpAsync(productId, posts.Where(p => p.ProductId == productId).ToList(), accounts, now, ct);
+        if (failure is not null) throw failure;
+    }
+
+    private async Task RollUpAsync(Guid productId, List<PublishedPost> posts, IReadOnlyDictionary<Guid, ChannelAccount> accounts, DateTimeOffset now, CancellationToken ct)
+    {
+        var ids = posts.Select(p => p.Id).ToList();
+        var all = await db.Snapshots.AsNoTracking().Where(s => ids.Contains(s.PublishedPostId)).ToListAsync(ct);
+        var latest = all.GroupBy(s => s.PublishedPostId).ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.TakenAt).First());
+        foreach (var byAccount in posts.GroupBy(p => p.AccountId!.Value))
+        {
+            if (!accounts.TryGetValue(byAccount.Key, out var account)) continue;
+            var points = new List<MetricPoint>();
+            foreach (var day in byAccount.GroupBy(p => DateOnly.FromDateTime(p.PublishedAt.UtcDateTime)))
+            {
+                var snaps = day.Select(p => latest.GetValueOrDefault(p.Id)).ToList();
+                if (snaps.Any(s => s is null)) continue;
+                decimal? Sum(Func<PostMetricSnapshot, decimal?> f) => snaps.Any(s => f(s!) is null) ? null : snaps.Sum(s => f(s!)!.Value);
+                points.Add(new MetricPoint(productId, "engagements", day.Key, day.Key, Sum(s => s.Reactions is null || s.Comments is null || s.Shares is null ? null : s.Reactions + s.Comments + s.Shares), account.Channel));
+                points.Add(new MetricPoint(productId, "impressions", day.Key, day.Key, Sum(s => s.Views), account.Channel));
+                points.Add(new MetricPoint(productId, "clicks", day.Key, day.Key, Sum(s => s.Clicks), account.Channel));
+            }
+            if (points.Count > 0) await sink!.RecordAsync($"{account.Provider}:{account.DisplayName} (posts)", "Social", productId, points, now, ct);
         }
     }
 }

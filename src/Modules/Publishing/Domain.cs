@@ -61,6 +61,26 @@ public sealed class PublishedPost : IOrganizationScoped
     public DateTimeOffset PublishedAt { get; set; }
 }
 
+/// <summary>
+/// What the network reported for one published post at one moment (figures are cumulative, so a series shows the post's growth).
+/// A figure is null when the network did not supply it, and is never stored as zero.
+/// </summary>
+public sealed class PostMetricSnapshot : IOrganizationScoped
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid OrganizationId { get; set; }
+    public Guid PublishedPostId { get; set; }
+    public Guid ProductId { get; set; }
+    public DateTimeOffset TakenAt { get; set; }
+    public int? Reactions { get; set; }
+    public int? Comments { get; set; }
+    public int? Shares { get; set; }
+    public long? Views { get; set; }
+    public long? Reach { get; set; }
+    public int? Clicks { get; set; }
+    public string? Note { get; set; }
+}
+
 /// <summary>Between the provider's consent screen and choosing which page to connect. Short-lived; the token is encrypted.</summary>
 public sealed class PendingConnection : IOrganizationScoped
 {
@@ -80,6 +100,7 @@ public sealed class PublishingDbContext(DbContextOptions<PublishingDbContext> op
     public DbSet<PublishingAttempt> Attempts => Set<PublishingAttempt>();
     public DbSet<PublishedPost> Posts => Set<PublishedPost>();
     public DbSet<PendingConnection> Pending => Set<PendingConnection>();
+    public DbSet<PostMetricSnapshot> Snapshots => Set<PostMetricSnapshot>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -107,6 +128,13 @@ public sealed class PublishingDbContext(DbContextOptions<PublishingDbContext> op
             e.Property(x => x.ProviderPostId).HasMaxLength(300); e.Property(x => x.Url).HasMaxLength(1000); e.Property(x => x.Note).HasMaxLength(1000);
             e.Property(x => x.Source).HasConversion<string>().HasMaxLength(20);
             e.HasIndex(x => new { x.ContentItemId, x.Version }).IsUnique();
+            e.HasIndex(x => x.ProductId);
+        });
+        b.Entity<PostMetricSnapshot>(e =>
+        {
+            e.ToTable("post_metric_snapshots"); e.HasKey(x => x.Id);
+            e.Property(x => x.Note).HasMaxLength(500);
+            e.HasIndex(x => new { x.PublishedPostId, x.TakenAt });
             e.HasIndex(x => x.ProductId);
         });
         b.Entity<PendingConnection>(e =>
