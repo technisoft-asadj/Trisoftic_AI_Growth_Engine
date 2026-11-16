@@ -1,0 +1,69 @@
+# Single-VM production stack. Copy infra/prod.env.example to infra/prod.env, fill it in, then:
+#   docker compose -f infra/docker-compose.prod.yml --env-file infra/prod.env up -d --build
+# TLS is expected to terminate in front of the `web` service (Caddy, a cloud load balancer, ...); it must send X-Forwarded-Proto.
+name: growth
+x-app-env: &app-env
+  ConnectionStrings__Default: "Host=postgres;Database=growthengine;Username=growth;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}"
+  ASPNETCORE_ENVIRONMENT: Production
+  Scheduling__LinkSecret: ${LINK_SECRET:?set LINK_SECRET}
+  Messaging__LinkSecret: ${LINK_SECRET}
+  Messaging__PublicBaseUrl: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL}
+  Messaging__FooterText: ${EMAIL_FOOTER_TEXT:-}
+  Messaging__Smtp__Host: ${SMTP_HOST:-}
+  Messaging__Smtp__Port: ${SMTP_PORT:-587}
+  Messaging__Smtp__User: ${SMTP_USER:-}
+  Messaging__Smtp__Password: ${SMTP_PASSWORD:-}
+  Publishing__Facebook__AppId: ${FACEBOOK_APP_ID:-}
+  Publishing__Facebook__AppSecret: ${FACEBOOK_APP_SECRET:-}
+  Publishing__Facebook__RedirectUri: ${PUBLIC_BASE_URL}/api/v1/publishing/connect/facebook/callback
+  Ai__Bedrock__Region: ${AWS_REGION:-}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  Governance__AllowSelfApproval: ${ALLOW_SELF_APPROVAL:-false}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: growth
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: growthengine
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U growth -d growthengine"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: { context: .., dockerfile: infra/docker/Dockerfile.dotnet, args: { HOST: Host.Api } }
+    restart: unless-stopped
+    depends_on: { postgres: { condition: service_healthy } }
+    environment:
+      <<: *app-env
+      Database__MigrateOnStartup: "true"   # the api owns migrations; the worker waits for it
+      Bootstrap__AdminEmail: ${ADMIN_EMAIL:?set ADMIN_EMAIL}
+      Bootstrap__AdminPassword: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
+    volumes: ["keys:/keys", "objects:/data/objects"]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf \"GET /health/ready HTTP/1.0\r\n\r\n\" >&3 && grep -q 200 <&3'"]
+      interval: 10s
+      retries: 12
+
+  worker:
+    build: { context: .., dockerfile: infra/docker/Dockerfile.dotnet, args: { HOST: Host.Worker } }
+    restart: unless-stopped
+    depends_on: { api: { condition: service_healthy } }
+    environment: *app-env
+    volumes: ["keys:/keys", "objects:/data/objects"]   # same keys as the api, or it cannot decrypt stored tokens
+
+  web:
+    build: { context: .., dockerfile: infra/docker/Dockerfile.web }
+    restart: unless-stopped
+    depends_on: [api]
+    ports: ["${WEB_PORT:-8080}:80"]
+
+volumes:
+  pgdata:
+  keys:
+  objects:

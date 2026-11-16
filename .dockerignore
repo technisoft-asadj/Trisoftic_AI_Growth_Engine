@@ -1,0 +1,8 @@
+**/bin/
+**/obj/
+**/node_modules/
+web/dist/
+.git/
+.github/
+*.md
+TriSoftic_AI_Growth_Engine_Document_Pack/

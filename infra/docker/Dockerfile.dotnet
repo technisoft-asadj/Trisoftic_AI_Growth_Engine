@@ -1,0 +1,21 @@
+# One Dockerfile for both .NET hosts. Build from the repo root:
+#   docker build -f infra/docker/Dockerfile.dotnet --build-arg HOST=Host.Api -t growth-api .
+#   docker build -f infra/docker/Dockerfile.dotnet --build-arg HOST=Host.Worker -t growth-worker .
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG HOST=Host.Api
+WORKDIR /src
+COPY global.json Directory.Build.props Directory.Packages.props ./
+COPY src ./src
+RUN dotnet publish src/${HOST} -c Release -o /out
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS run
+ARG HOST=Host.Api
+WORKDIR /app
+COPY --from=build /out .
+# Keys that protect stored provider tokens, and uploaded files, live on volumes shared by api and worker.
+RUN mkdir -p /keys /data && chown -R $APP_UID /keys /data
+ENV ASPNETCORE_URLS=http://+:8080 DataProtection__KeysPath=/keys Storage__Root=/data/objects
+USER $APP_UID
+EXPOSE 8080
+ENV APP_DLL=TriSoftic.GrowthEngine.${HOST}.dll
+ENTRYPOINT ["sh", "-c", "exec dotnet /app/$APP_DLL"]

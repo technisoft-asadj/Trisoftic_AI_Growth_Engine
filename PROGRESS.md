@@ -71,7 +71,7 @@ Tests at last run: 136 unit + 17 architecture + 138 integration = **291 passing*
 
 ## Next steps when work resumes (in order)
 
-1. Phase 5-6 per IMPLEMENTATION_PLAN.md (needs real data first). Also the outstanding gaps: real Facebook/SMTP/n8n/Bedrock-5.x verification, S3 storage, production compose + `DataProtection:KeysPath`, CI run, merge undo, saved segments, contact/company create forms, browser check of the whole web app.
+1. Phase 5-6 per IMPLEMENTATION_PLAN.md (needs real data first). Also the outstanding gaps: real Facebook/SMTP/n8n/Bedrock-5.x verification, S3 storage, CI run, merge undo, saved segments, contact/company create forms, browser check of the whole web app.
 Note: contacts, consent, leads and pipelines live in one `Crm` module (the plan listed CRM, Lead Management and Sales separately); they share transactions and one visibility rule, so splitting them would only add plumbing.
 
 ## Decisions made on your behalf (override any)
@@ -116,3 +116,11 @@ Secrets via env vars, e.g. `Ai__Anthropic__ApiKey`, `Ai__OpenAi__ApiKey` + `Ai__
 1. 1.11 Strategy workspace persistence + UI, then Phase 2 (campaigns, content versions, approvals UI, calendar; CRM track).
 2. Make the first real AI call and tune prompts with the pilot products' real fact sheets (the real critical path is the fact sheets, see plan §11).
 3. Phase 0 spike for the Facebook Page API (app review lead time) — start the Meta developer app now.
+
+## Production deployment (added)
+
+`infra/docker-compose.prod.yml` runs postgres, api, worker and an nginx `web` (serves the built SPA, proxies `/api` and `/health`). Copy `infra/prod.env.example` to `infra/prod.env` and fill it in; then `docker compose -f infra/docker-compose.prod.yml --env-file infra/prod.env up -d --build`.
+- Verified locally: all images build, the api migrates every module and turns healthy, the worker starts after it, login works through the proxy, SPA deep links work, the budget and AI-usage endpoints answer.
+- `DataProtection:KeysPath=/keys` and `Storage:Root` are volumes shared by api and worker (the worker must decrypt tokens the api stored). Back up the `keys` volume: losing it makes stored provider tokens unreadable and every page connection must be redone.
+- TLS is not included: put Caddy or a load balancer in front of `web` and have it send `X-Forwarded-Proto`. `PUBLIC_BASE_URL` must be the public https address.
+- Not verified: behaviour with real SMTP/Facebook/Bedrock credentials; a harmless `libgssapi_krb5` warning appears in logs.

@@ -1,4 +1,4 @@
-# Local development dependencies. Production compose lives in infra/docker-compose.prod.yml (WP1.1 later).
+# Local development dependencies. Production stack: infra/docker-compose.prod.yml (see PROGRESS.md).
 services:
   postgres:
     image: postgres:17-alpine

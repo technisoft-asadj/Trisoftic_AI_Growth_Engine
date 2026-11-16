@@ -11,3 +11,4 @@ dist/
 !.env.example
 TestResults/
 coverage/
+infra/prod.env
