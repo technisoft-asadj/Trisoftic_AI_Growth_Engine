@@ -23,6 +23,7 @@ public sealed class ModuleBoundaryTests
         typeof(TriSoftic.GrowthEngine.Modules.Messaging.MessagingModule).Assembly,
         typeof(TriSoftic.GrowthEngine.Modules.Analytics.AnalyticsModule).Assembly,
         typeof(TriSoftic.GrowthEngine.Modules.Budget.BudgetModule).Assembly,
+        typeof(TriSoftic.GrowthEngine.Modules.Planning.PlanningModule).Assembly,
     ];
 
     private static string ModuleName(Assembly a) => a.GetName().Name!.Split('.').Last();

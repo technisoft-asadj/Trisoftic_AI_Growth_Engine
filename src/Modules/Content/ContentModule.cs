@@ -20,6 +20,7 @@ public static class ContentModule
         s.AddModuleDbContext<ContentDbContext>(c, ContentDbContext.Schema);
         s.AddScoped<IApprovalSubjectHandler, ContentApprovalHandler>();
         s.AddScoped<IContentPublishSource, ContentPublishSource>();
+        s.AddScoped<IContentPlanner, ContentPlanner>();
         return s;
     }
 

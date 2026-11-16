@@ -9,6 +9,7 @@ public sealed class FakeClock : IClock
     private DateTimeOffset _now = DateTimeOffset.UtcNow;
     public DateTimeOffset UtcNow => _now;
     public void Advance(TimeSpan by) => _now += by;
+    public void Set(DateTimeOffset to) => _now = to;
 }
 
 /// <summary>Job handler whose behaviour is driven by the payload: {"fail":"transient"|"permanent"}.</summary>

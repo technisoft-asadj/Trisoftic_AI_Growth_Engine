@@ -24,6 +24,7 @@ public static class AiModule
         s.AddScoped<IAiGenerator, AiGenerator>();
         s.AddScoped<GroundedGenerator>();
         s.AddScoped<IAiDraftLookup, AiDraftLookup>();
+        s.AddScoped<IContentDrafter, ContentDrafter>();
         return s;
     }
 
@@ -139,4 +140,29 @@ public sealed class AiDraftLookup(AiDbContext db) : IAiDraftLookup
     public async Task<DraftSummary?> GetAsync(Guid draftId, Guid productId, CancellationToken ct = default) =>
         await db.Drafts.AsNoTracking().Where(d => d.Id == draftId && d.ProductId == productId)
             .Select(d => new DraftSummary(d.Id, d.ProductId, d.Kind, d.Title, d.Body, d.ProfileVersion, d.Provider, d.Model, d.CreatedAt)).FirstOrDefaultAsync(ct);
+}
+
+/// <summary>Lets the plan module draft a post from the approved profile without knowing anything about AI. Saved exactly like a draft made in the AI studio.</summary>
+public sealed class ContentDrafter(GroundedGenerator gen, AiDbContext db, ICurrentUser user, IClock clock, IAuditWriter audit) : IContentDrafter
+{
+    public async Task<Result<DraftedContent>> DraftPostAsync(Guid productId, string brief, string? channel, string? language, CancellationToken ct = default)
+    {
+        var res = await gen.GenerateAsync(new GroundedRequest(productId, GroundedKind.ContentDraft, brief, channel, language, null), ct);
+        if (!res.IsSuccess) return res.Error!;
+        var o = res.Value!;
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var saved = new AiDraft
+        {
+            ProductId = productId, Kind = GroundedKind.ContentDraft.ToString(), Brief = brief, Channel = channel, Language = language,
+            Title = o.Draft.Title, Body = o.Draft.Body, ClaimsJson = System.Text.Json.JsonSerializer.Serialize(o.Draft.Claims, json),
+            QuestionsJson = System.Text.Json.JsonSerializer.Serialize(o.Draft.Questions, json), ProfileVersion = o.ProfileVersion,
+            Provider = o.Provider, Model = o.Model, TemplateKey = o.TemplateKey, TemplateVersion = o.TemplateVersion, CostUsd = o.CostUsd,
+            CreatedBy = user.UserId, CreatedAt = clock.UtcNow,
+        };
+        db.Drafts.Add(saved);
+        await db.SaveChangesAsync(ct);
+        await audit.WriteAsync(new AuditEntry("ai.generated", "AiDraft", saved.Id.ToString(), productId, $"{o.TemplateKey} v{o.TemplateVersion}",
+            After: new { o.Provider, o.Model, o.CostUsd, o.ProfileVersion, o.Attempts }), ct);
+        return new DraftedContent(saved.Id, o.Draft.Title, o.Draft.Body, o.Draft.Questions);
+    }
 }

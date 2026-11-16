@@ -201,6 +201,23 @@ public sealed class PublishingScheduler(IServiceScopeFactory scopes, IClock cloc
     }
 }
 
+/// <summary>The publishing module's side of the growth-plan contract: the latest stored figures for each published post.</summary>
+public sealed class PostPerformanceReader(PublishingDbContext db) : IPostPerformanceReader
+{
+    public async Task<IReadOnlyList<PostPerformance>> GetAsync(IReadOnlyCollection<Guid> contentItemIds, CancellationToken ct = default)
+    {
+        var posts = await db.Posts.AsNoTracking().Where(p => contentItemIds.Contains(p.ContentItemId)).ToListAsync(ct);
+        var ids = posts.Select(p => p.Id).ToList();
+        var latest = (await db.Snapshots.AsNoTracking().Where(s => ids.Contains(s.PublishedPostId)).ToListAsync(ct))
+            .GroupBy(s => s.PublishedPostId).ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.TakenAt).First());
+        return posts.Select(p =>
+        {
+            latest.TryGetValue(p.Id, out var s);
+            return new PostPerformance(p.ContentItemId, p.PublishedAt, p.Url, s?.TakenAt, s?.Reactions, s?.Comments, s?.Shares, s?.Views, s?.Reach, s?.Clicks, s?.Note);
+        }).ToList();
+    }
+}
+
 /// <summary>
 /// Asks the network how each recently published post is doing and stores a snapshot. Posts older than <see cref="WindowDays"/> are left alone.
 /// The same figures are summed into analytics per publish day (engagements, impressions, clicks), but only when every post of that day has the figure,

@@ -1,12 +1,14 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace TriSoftic.GrowthEngine.Tests.Integration;
 
 [Collection("host")]
 public sealed class ContentTests(TestHost host)
 {
+    private FakeClock Clock => host.Services.GetRequiredService<FakeClock>();   // the server runs on this clock, so "in the future" must be measured on it too
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private static async Task<Guid> ProductAsync(HttpClient admin)
@@ -52,7 +54,7 @@ public sealed class ContentTests(TestHost host)
         Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsync($"/api/v1/content/{id}/submit", null)).StatusCode);
 
         // cannot schedule before approval
-        var at = DateTimeOffset.UtcNow.AddDays(2);
+        var at = Clock.UtcNow.AddDays(2);
         Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync($"/api/v1/content/{id}/schedule", new { at })).StatusCode);
 
         var ap = await PendingFor(admin, id);
@@ -61,7 +63,7 @@ public sealed class ContentTests(TestHost host)
         Assert.Equal("Approved", item.GetProperty("status").GetString());
         Assert.Equal(1, item.GetProperty("approvedVersion").GetInt32());
 
-        Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync($"/api/v1/content/{id}/schedule", new { at = DateTimeOffset.UtcNow.AddMinutes(-5) })).StatusCode);   // past
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync($"/api/v1/content/{id}/schedule", new { at = Clock.UtcNow.AddMinutes(-5) })).StatusCode);   // past
         var sched = await admin.PostAsJsonAsync($"/api/v1/content/{id}/schedule", new { at });
         Assert.Equal(HttpStatusCode.OK, sched.StatusCode);
 
@@ -85,7 +87,7 @@ public sealed class ContentTests(TestHost host)
         var id = await NewContent(admin, pid);
         await admin.PostAsync($"/api/v1/content/{id}/submit", null);
         await Decide(approver, await PendingFor(admin, id), "Approved");
-        await admin.PostAsJsonAsync($"/api/v1/content/{id}/schedule", new { at = DateTimeOffset.UtcNow.AddDays(1) });
+        await admin.PostAsJsonAsync($"/api/v1/content/{id}/schedule", new { at = Clock.UtcNow.AddDays(1) });
 
         var edit = await admin.PostAsJsonAsync($"/api/v1/content/{id}/versions", new { body = "Changed after approval", baseVersion = 1, note = "tweak" });
         Assert.Equal(HttpStatusCode.OK, edit.StatusCode);
@@ -94,7 +96,7 @@ public sealed class ContentTests(TestHost host)
         Assert.Equal(JsonValueKind.Null, item.GetProperty("scheduledFor").ValueKind);
         Assert.Equal(1, item.GetProperty("approvedVersion").GetInt32());     // v1 was approved, v2 is current
         Assert.Equal(2, item.GetProperty("currentVersion").GetInt32());
-        Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync($"/api/v1/content/{id}/schedule", new { at = DateTimeOffset.UtcNow.AddDays(1) })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync($"/api/v1/content/{id}/schedule", new { at = Clock.UtcNow.AddDays(1) })).StatusCode);
 
         // v1 text is preserved in history
         Assert.Equal("Hello shop owners", (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/content/{id}/versions/1", Json)).GetProperty("body").GetString());
@@ -179,9 +181,9 @@ public sealed class ContentTests(TestHost host)
         var ap = await PendingFor(creator, id);
         Assert.Equal(HttpStatusCode.Forbidden, (await Decide(creator, ap, "Approved")).StatusCode);                  // creators cannot approve
         Assert.Equal(HttpStatusCode.OK, (await Decide(approver, ap, "Approved")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await creator.PostAsJsonAsync($"/api/v1/content/{id}/schedule", new { at = DateTimeOffset.UtcNow.AddDays(1) })).StatusCode);   // no publishing.manage
+        Assert.Equal(HttpStatusCode.NotFound, (await creator.PostAsJsonAsync($"/api/v1/content/{id}/schedule", new { at = Clock.UtcNow.AddDays(1) })).StatusCode);   // no publishing.manage
         Assert.Equal(HttpStatusCode.NotFound, (await approver.PostAsJsonAsync($"/api/v1/products/{pid}/content", new { title = "x", channel = "fb", body = "y" })).StatusCode);          // approvers do not write
-        Assert.Equal(HttpStatusCode.OK, (await manager.PostAsJsonAsync($"/api/v1/content/{id}/schedule", new { at = DateTimeOffset.UtcNow.AddDays(1) })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await manager.PostAsJsonAsync($"/api/v1/content/{id}/schedule", new { at = Clock.UtcNow.AddDays(1) })).StatusCode);
     }
 
     [Fact]
