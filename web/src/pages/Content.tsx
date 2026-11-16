@@ -49,7 +49,7 @@ export function ContentTab({ productId }: { productId: string }) {
       {can('content.write') && (
         <form className="card" onSubmit={(e: FormEvent) => { e.preventDefault(); create.mutate() }}>
           <h2>New content</h2>
-          <p className="muted">Tip: generate a draft in the AI studio first, then copy it here, or write it yourself.</p>
+          <p className="muted">Tip: generate a draft in the AI studio and use "Create content from this draft", or write it yourself.</p>
           <div className="row">
             <label>Title<input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required maxLength={300} /></label>
             <label>Channel<input value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value })} required /></label>

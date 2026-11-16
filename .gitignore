@@ -12,3 +12,5 @@ dist/
 TestResults/
 coverage/
 infra/prod.env
+
+.claude/settings.local.json

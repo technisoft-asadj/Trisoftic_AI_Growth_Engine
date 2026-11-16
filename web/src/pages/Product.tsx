@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link, NavLink, Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom'
+import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError, type AssetItem, type Fact, type Claim, type Grounded, type Product, type Profile, type ProfileVersion } from '../api.ts'
 import { useAuth } from '../auth.tsx'
@@ -233,6 +233,17 @@ function GenerateTab({ product }: { product: Product }) {
   })
   useEffect(() => { gen.reset() }, [kind]) // eslint-disable-line react-hooks/exhaustive-deps
   const d = gen.data
+  const qc = useQueryClient()
+  const saved = useQuery({ queryKey: ['ai-drafts', product.id], queryFn: () => api.get<SavedDraft[]>(`/api/v1/products/${product.id}/ai/drafts`) })
+  useEffect(() => { if (gen.isSuccess) void qc.invalidateQueries({ queryKey: ['ai-drafts', product.id] }) }, [gen.isSuccess]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [openId, setOpenId] = useState<string | null>(null)
+  const open = useQuery({ queryKey: ['ai-draft', openId], enabled: !!openId, queryFn: () => api.get<SavedDraftDetail>(`/api/v1/ai/drafts/${openId}`) })
+  const nav = useNavigate()
+  const toContent = useMutation({
+    mutationFn: (x: { draftId: string; title: string; body: string; channel?: string; language?: string }) =>
+      api.post(`/api/v1/products/${product.id}/content`, { title: x.title, channel: x.channel || 'Facebook', format: 'Post', language: x.language || null, body: x.body, sourceDraftId: x.draftId }),
+    onSuccess: () => nav(`/products/${product.id}/content`),
+  })
 
   return (
     <>
@@ -254,10 +265,36 @@ function GenerateTab({ product }: { product: Product }) {
           <h3>Claims &amp; sources</h3>
           <ul>{d.draft.claims.map((c, i) => <li key={i}>{c.text} — {c.assumption ? <span className="badge warn">assumption</span> : <code>{c.factRef}</code>}</li>)}</ul>
           {d.draft.questions.length > 0 && (<><h3>The AI needs more information</h3><ul>{d.draft.questions.map((q) => <li key={q}>{q}</li>)}</ul></>)}
-          <p><Link to={`/products/${product.id}/strategies?draft=${d.draftId}`}>Create a strategy from this draft →</Link></p>
+          {kind === 'ContentDraft'
+            ? <p><button type="button" disabled={toContent.isPending} onClick={() => toContent.mutate({ draftId: d.draftId, title: d.draft.title, body: d.draft.body, channel: channel || undefined, language: language || undefined })}>Create content from this draft</button></p>
+            : <p><Link to={`/products/${product.id}/strategies?draft=${d.draftId}`}>Create a strategy from this draft →</Link></p>}
+          <ErrorBox error={toContent.error} />
           <p className="muted">Based on profile v{d.profileVersion} · {d.provider}/{d.model} · ${d.costUsd.toFixed(4)} · {d.attempts} attempt(s). Saved as an AI draft; nothing is published, and a human must review it.</p>
         </div>
       )}
+      <div className="card">
+        <h2>Saved AI drafts</h2>
+        {saved.isLoading && <p className="muted">Loading…</p>}
+        {saved.data?.length === 0 && <p className="muted">No drafts yet.</p>}
+        <ul>
+          {saved.data?.map((s) => (
+            <li key={s.id}>
+              <button type="button" className="link" onClick={() => setOpenId(openId === s.id ? null : s.id)}>{s.title || '(untitled)'}</button>{' '}
+              <span className="muted">{s.kind} · {s.channel ?? '—'} · {new Date(s.createdAt).toLocaleString()} · ${s.costUsd.toFixed(4)}</span>
+              {openId === s.id && open.data && (
+                <div>
+                  <pre className="draft">{open.data.body}</pre>
+                  {open.data.questions.length > 0 && <><strong>The AI needs more information</strong><ul>{open.data.questions.map((q) => <li key={q}>{q}</li>)}</ul></>}
+                  {s.kind === 'ContentDraft' && <button type="button" disabled={toContent.isPending} onClick={() => toContent.mutate({ draftId: s.id, title: open.data.title, body: open.data.body, channel: s.channel ?? undefined, language: s.language ?? undefined })}>Create content from this draft</button>}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
     </>
   )
 }
+
+interface SavedDraft { id: string; kind: string; title: string; channel: string | null; language: string | null; costUsd: number; createdAt: string }
+interface SavedDraftDetail { id: string; title: string; body: string; questions: string[] }
