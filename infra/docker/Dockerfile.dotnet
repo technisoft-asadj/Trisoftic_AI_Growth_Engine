@@ -13,7 +13,7 @@ ARG HOST=Host.Api
 WORKDIR /app
 COPY --from=build /out .
 # Keys that protect stored provider tokens, and uploaded files, live on volumes shared by api and worker.
-RUN mkdir -p /keys /data && chown -R $APP_UID /keys /data
+RUN mkdir -p /keys /data/objects && chown -R $APP_UID /keys /data   # a new named volume copies this ownership
 ENV ASPNETCORE_URLS=http://+:8080 DataProtection__KeysPath=/keys Storage__Root=/data/objects
 USER $APP_UID
 EXPOSE 8080

@@ -32,12 +32,12 @@ export function ProductPage() {
       <h1>{p.name}</h1>
       <p className="muted">{p.kind} · {p.lifecycle} · {p.approvedProfileVersion ? `approved profile v${p.approvedProfileVersion}` : 'no approved profile yet'}</p>
       <nav className="tabs">
-        <NavLink to="profile">Profile</NavLink>
-        {can('assets.read') && <NavLink to="assets">Assets</NavLink>}
-        {can('products.read') && <NavLink to="strategies">Strategies</NavLink>}
-        {can('products.read') && <NavLink to="campaigns">Campaigns</NavLink>}
-        {can('products.read') && <NavLink to="content">Content</NavLink>}
-        {can('ai.generate') && <NavLink to="generate">AI studio</NavLink>}
+        <NavLink to={`/products/${p.id}/profile`}>Profile</NavLink>
+        {can('assets.read') && <NavLink to={`/products/${p.id}/assets`}>Assets</NavLink>}
+        {can('products.read') && <NavLink to={`/products/${p.id}/strategies`}>Strategies</NavLink>}
+        {can('products.read') && <NavLink to={`/products/${p.id}/campaigns`}>Campaigns</NavLink>}
+        {can('products.read') && <NavLink to={`/products/${p.id}/content`}>Content</NavLink>}
+        {can('ai.generate') && <NavLink to={`/products/${p.id}/generate`}>AI studio</NavLink>}
       </nav>
       <Routes>
         <Route index element={<Navigate to="profile" replace />} />
@@ -254,7 +254,7 @@ function GenerateTab({ product }: { product: Product }) {
           <h3>Claims &amp; sources</h3>
           <ul>{d.draft.claims.map((c, i) => <li key={i}>{c.text} — {c.assumption ? <span className="badge warn">assumption</span> : <code>{c.factRef}</code>}</li>)}</ul>
           {d.draft.questions.length > 0 && (<><h3>The AI needs more information</h3><ul>{d.draft.questions.map((q) => <li key={q}>{q}</li>)}</ul></>)}
-          <p><Link to={`../strategies?draft=${d.draftId}`}>Create a strategy from this draft →</Link></p>
+          <p><Link to={`/products/${product.id}/strategies?draft=${d.draftId}`}>Create a strategy from this draft →</Link></p>
           <p className="muted">Based on profile v{d.profileVersion} · {d.provider}/{d.model} · ${d.costUsd.toFixed(4)} · {d.attempts} attempt(s). Saved as an AI draft; nothing is published, and a human must review it.</p>
         </div>
       )}

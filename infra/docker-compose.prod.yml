@@ -16,6 +16,9 @@ x-app-env: &app-env
   Publishing__Facebook__AppId: ${FACEBOOK_APP_ID:-}
   Publishing__Facebook__AppSecret: ${FACEBOOK_APP_SECRET:-}
   Publishing__Facebook__RedirectUri: ${PUBLIC_BASE_URL}/api/v1/publishing/connect/facebook/callback
+  Ai__DefaultProvider: ${AI_PROVIDER:-Anthropic}   # Anthropic | OpenAi | Bedrock
+  Ai__Anthropic__ApiKey: ${ANTHROPIC_API_KEY:-}
+  Ai__OpenAi__ApiKey: ${OPENAI_API_KEY:-}
   Ai__Bedrock__Region: ${AWS_REGION:-}
   AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}

@@ -19,6 +19,18 @@ const blankStep = (kind: string): Step => ({ wait: { kind, minutes: 60 }, if: { 
   notify: { kind, message: '', to: 'owner' }, webhook: { kind, name: '' }, waituntil: { kind, field: 'start', offsetMinutes: -60 },
   email: { kind, purpose: 'transactional', subject: '', body: '' } } as Record<string, Step>)[kind] ?? { kind }
 
+// Display names only; the raw ids stay the saved values. Anything not listed falls back to its raw id.
+const LABELS: Record<string, string> = {
+  'lead.created': 'A lead arrives', 'lead.assigned': 'A lead is assigned', 'lead.status-changed': 'A lead changes status',
+  'opportunity.created': 'A deal is created', 'opportunity.stage-changed': 'A deal changes stage',
+  'booking.created': 'A booking is made', 'booking.cancelled': 'A booking is cancelled',
+  'analytics.source-stale': 'A data source goes stale', 'budget.threshold-crossed': 'A budget reaches its warning or stop level',
+  wait: 'Wait a while', waituntil: 'Wait until a date on the record', if: 'Continue only if…', task: 'Create a task',
+  notify: 'Notify someone', webhook: 'Call an n8n webhook', email: 'Send an email',
+  eq: 'equals', ne: 'does not equal', contains: 'contains', gt: 'is more than', lt: 'is less than', exists: 'is present', empty: 'is empty',
+}
+const label = (x: string) => LABELS[x] ?? x
+
 export function AutomationPage() {
   const catalog = useQuery({ queryKey: ['auto-catalog'], queryFn: () => api.get<Catalog>('/api/v1/automation/triggers') })
   const list = useQuery({ queryKey: ['workflows'], queryFn: () => api.get<WorkflowRow[]>('/api/v1/automation/workflows') })
@@ -33,7 +45,7 @@ export function AutomationPage() {
       {list.data?.length === 0 && <p className="muted">No workflows yet.</p>}
       {list.data?.map((w) => (
         <div className="card" key={w.id}>
-          <strong>{w.name}</strong> <span className="muted">· when {w.trigger} · v{w.currentVersion}</span>{' '}
+          <strong>{w.name}</strong> <span className="muted">· when {label(w.trigger).toLowerCase()} · v{w.currentVersion}</span>{' '}
           <span className={w.enabled ? 'badge ok' : 'badge warn'}>{w.enabled ? 'On' : 'Paused'}</span>{' '}
           <button className="link" onClick={() => setOpen(open === w.id ? '' : w.id)}>{open === w.id ? 'Hide' : 'Details'}</button>
           {open === w.id && catalog.data && <WorkflowDetail id={w.id} catalog={catalog.data} />}
@@ -130,7 +142,7 @@ function Builder({ catalog, existing, onSaved }: { catalog: Catalog; existing?: 
   })
   const setStep = (i: number, p: Partial<Step>) => setSteps(steps.map((s, j) => (j === i ? { ...s, ...p } : s)))
   const setCond = (i: number, p: Partial<Cond>) => setConditions(conditions.map((c, j) => (j === i ? { ...c, ...p } : c)))
-  const opts = (xs: string[]) => xs.map((x) => <option key={x}>{x}</option>)
+  const opts = (xs: string[]) => xs.map((x) => <option key={x} value={x}>{label(x)}</option>)
 
   return (
     <div className="card">
@@ -162,7 +174,7 @@ function Builder({ catalog, existing, onSaved }: { catalog: Catalog; existing?: 
       <p className="muted">Use {'{{contactName}}'}-style placeholders in text. “owner” means the person responsible for the record.</p>
       {steps.map((s, i) => (
         <div className="row" key={i} style={{ borderTop: '1px solid var(--line)', paddingTop: '.5rem' }}>
-          <strong>{i + 1}. {s.kind}</strong>
+          <strong>{i + 1}. {label(s.kind)}</strong>
           {s.kind === 'wait' && <label>Minutes<input type="number" min={1} value={s.minutes ?? 60} onChange={(e) => setStep(i, { minutes: Number(e.target.value) })} /></label>}
           {s.kind === 'if' && <>
             <label>Field<select value={s.field} onChange={(e) => setStep(i, { field: e.target.value })}>{opts(fields)}</select></label>
