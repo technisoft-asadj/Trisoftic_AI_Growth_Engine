@@ -16,7 +16,7 @@ namespace TriSoftic.GrowthEngine.Modules.Content.Migrations
                 table: "versions",
                 type: "jsonb",
                 nullable: false,
-                defaultValue: "");
+                defaultValue: "[]");
         }
 
         /// <inheritdoc />

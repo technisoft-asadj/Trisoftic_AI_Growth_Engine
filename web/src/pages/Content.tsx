@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../api.ts'
+import { api, ApiError, type AssetItem } from '../api.ts'
 import { useAuth } from '../auth.tsx'
 
 interface ItemSummary { id: string; productId: string; campaignId?: string; title: string; channel: string; format: string; language?: string; currentVersion: number; approvedVersion?: number; status: string; scheduledFor?: string }
-interface ItemDetail { item: ItemSummary; current: { number: number; title: string; body: string; note?: string; sourceDraftId?: string }; versions: { number: number; note?: string; approved: boolean; createdAt: string }[] }
+interface ItemDetail { item: ItemSummary; current: { number: number; title: string; body: string; note?: string; sourceDraftId?: string; assetIds: string[]; media: { id: string; name: string; contentType: string; sizeBytes: number; isRetired: boolean }[] }; versions: { number: number; note?: string; approved: boolean; createdAt: string }[] }
 interface Campaign { id: string; name: string; objective: string; status: string; budgetUsd?: number; startDate?: string; endDate?: string; channels: string }
 
 const statusClass = (s: string) => (['Approved', 'Scheduled', 'Published'].includes(s) ? 'badge ok' : ['Rejected', 'Cancelled', 'PublishFailed'].includes(s) ? 'badge warn' : 'badge')
@@ -24,10 +24,10 @@ export function ContentTab({ productId }: { productId: string }) {
   const list = useQuery({ queryKey: ['content', productId], queryFn: () => api.get<ItemSummary[]>(`/api/v1/content?productId=${productId}`) })
   const formats = useQuery({ queryKey: ['formats'], queryFn: () => api.get<string[]>('/api/v1/content-formats') })
   const campaigns = useQuery({ queryKey: ['campaigns', productId], queryFn: () => api.get<Campaign[]>(`/api/v1/products/${productId}/campaigns`) })
-  const [f, setF] = useState({ title: '', channel: 'facebook', format: 'Post', body: '', campaignId: '' })
+  const [f, setF] = useState({ title: '', channel: 'facebook', format: 'Post', body: '', campaignId: '', assetIds: [] as string[] })
   const create = useMutation({
     mutationFn: () => api.post<ItemSummary>(`/api/v1/products/${productId}/content`, { ...f, campaignId: f.campaignId || null }),
-    onSuccess: (r) => { setF({ ...f, title: '', body: '' }); setOpen(r.id); void qc.invalidateQueries({ queryKey: ['content'] }) },
+    onSuccess: (r) => { setF({ ...f, title: '', body: '', assetIds: [] }); setOpen(r.id); void qc.invalidateQueries({ queryKey: ['content'] }) },
   })
 
   if (open) return <ContentEditor id={open} onBack={() => setOpen(null)} />
@@ -57,6 +57,7 @@ export function ContentTab({ productId }: { productId: string }) {
             <label>Campaign<select value={f.campaignId} onChange={(e) => setF({ ...f, campaignId: e.target.value })}><option value="">None</option>{campaigns.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
           </div>
           <label>Text<textarea rows={6} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} /></label>
+          <MediaPicker productId={productId} value={f.assetIds} onChange={(assetIds) => setF({ ...f, assetIds })} />
           <button type="submit" disabled={create.isPending}>Create draft</button>
           <Err e={create.error} />
         </form>
@@ -77,17 +78,18 @@ function EditorBody({ d, onBack }: { d: ItemDetail; onBack: () => void }) {
   const it = d.item
   const [title, setTitle] = useState(d.current.title)
   const [body, setBody] = useState(d.current.body)
+  const [assetIds, setAssetIds] = useState<string[]>(d.current.assetIds ?? [])
   const [note, setNote] = useState('')
   const [at, setAt] = useState('')
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['content-item', it.id] }); void qc.invalidateQueries({ queryKey: ['content'] }); void qc.invalidateQueries({ queryKey: ['approvals'] }); void qc.invalidateQueries({ queryKey: ['calendar'] }) }
-  const save = useMutation({ mutationFn: () => api.post(`/api/v1/content/${it.id}/versions`, { title, body, note: note || null, baseVersion: it.currentVersion }), onSuccess: refresh })
+  const save = useMutation({ mutationFn: () => api.post(`/api/v1/content/${it.id}/versions`, { title, body, note: note || null, baseVersion: it.currentVersion, assetIds }), onSuccess: refresh })
   const submit = useItemAction(it.id, 'submit', refresh)
   const withdraw = useItemAction(it.id, 'withdraw', refresh)
   const cancel = useItemAction(it.id, 'cancel', refresh)
   const unschedule = useItemAction(it.id, 'unschedule', refresh)
   const schedule = useMutation({ mutationFn: () => api.post(`/api/v1/content/${it.id}/schedule`, { at: new Date(at).toISOString() }), onSuccess: refresh })
   const canWrite = can('content.write') && it.status !== 'Cancelled'
-  const dirty = title !== d.current.title || body !== d.current.body
+  const dirty = title !== d.current.title || body !== d.current.body || assetIds.join() !== (d.current.assetIds ?? []).join()
   const error = save.error ?? submit.error ?? withdraw.error ?? cancel.error ?? schedule.error ?? unschedule.error
 
   return (
@@ -103,6 +105,7 @@ function EditorBody({ d, onBack }: { d: ItemDetail; onBack: () => void }) {
       <form className="card" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate() }}>
         <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} disabled={!canWrite} /></label>
         <label>Text<textarea rows={12} value={body} onChange={(e) => setBody(e.target.value)} disabled={!canWrite} /></label>
+        <MediaPicker productId={it.productId} value={assetIds} onChange={setAssetIds} disabled={!canWrite} />
         {canWrite && (
           <div className="row">
             <label>What changed?<input value={note} onChange={(e) => setNote(e.target.value)} /></label>
@@ -214,5 +217,35 @@ export function CalendarPage() {
       {approved.data?.length === 0 && <p className="muted">None.</p>}
       <ul>{approved.data?.map((i) => <li key={i.id}><Link to={`/products/${i.productId}/content`}>{i.title}</Link> <span className="muted">· {i.channel} · v{i.approvedVersion}</span></li>)}</ul>
     </>
+  )
+}
+
+// ---------------- media picker ----------------
+
+/** Choose the images or video that go out with a post. The order of selection is the order they are posted in. */
+function MediaPicker({ productId, value, onChange, disabled }: { productId: string; value: string[]; onChange: (v: string[]) => void; disabled?: boolean }) {
+  const assets = useQuery({ queryKey: ['assets', productId], queryFn: () => api.get<AssetItem[]>(`/api/v1/products/${productId}/assets`) })
+  const usable = (assets.data ?? []).filter((a) => a.contentType.startsWith('image/') || a.contentType.startsWith('video/'))
+  const toggle = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id])
+  return (
+    <fieldset className="card">
+      <legend>Photos or video <span className="muted">(optional)</span></legend>
+      {assets.isLoading && <p className="muted">Loading files…</p>}
+      {assets.data && usable.length === 0 && <p className="muted">No images or videos yet. Upload some in the Assets tab, with the right usage rights, then attach them here.</p>}
+      <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
+        {usable.map((a) => {
+          const n = value.indexOf(a.id)
+          return (
+            <label key={a.id} style={{ width: 140, cursor: disabled ? 'default' : 'pointer', opacity: a.rights === 'InternalOnly' ? 0.5 : 1 }} title={a.rights === 'InternalOnly' ? 'Marked internal-only: cannot be published' : a.name}>
+              {a.contentType.startsWith('image/')
+                ? <img src={`/api/v1/assets/${a.id}/content`} alt={a.name} style={{ width: 140, height: 100, objectFit: 'cover', borderRadius: 6, outline: n >= 0 ? '3px solid var(--accent, #6366f1)' : 'none' }} />
+                : <div style={{ width: 140, height: 100, display: 'grid', placeItems: 'center', background: 'rgba(128,128,128,.2)', borderRadius: 6, outline: n >= 0 ? '3px solid var(--accent, #6366f1)' : 'none' }}>▶ video</div>}
+              <div><input type="checkbox" checked={n >= 0} disabled={disabled} onChange={() => toggle(a.id)} /> {n >= 0 && <b>{n + 1}. </b>}<span className="muted">{a.name}</span></div>
+            </label>
+          )
+        })}
+      </div>
+      {value.length > 0 && <p className="muted">{value.length} file{value.length > 1 ? 's' : ''} attached. A post can carry up to 10 images, or one video. A story needs exactly one image. Attaching files means the approval covers exactly these files.</p>}
+    </fieldset>
   )
 }

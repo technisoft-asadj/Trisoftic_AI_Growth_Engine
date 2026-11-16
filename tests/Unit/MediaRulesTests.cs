@@ -58,3 +58,16 @@ public sealed class MediaRulesTests
         Assert.Contains(V("Post", true, Img("other.png", product: Guid.NewGuid())), e => e.Contains("another product"));
     }
 }
+
+public sealed class VersionMediaStorageTests
+{
+    [Fact]
+    public void A_version_row_written_before_files_existed_reads_as_having_no_files_instead_of_failing()
+    {
+        // This is exactly what the column held for existing rows after the first migration: a placeholder object, not a list.
+        Assert.Empty(new TriSoftic.GrowthEngine.Modules.Content.ContentVersion { AssetIdsJson = "{}" }.AssetIds);
+        Assert.Empty(new TriSoftic.GrowthEngine.Modules.Content.ContentVersion { AssetIdsJson = "" }.AssetIds);
+        var id = Guid.NewGuid();
+        Assert.Equal([id], new TriSoftic.GrowthEngine.Modules.Content.ContentVersion { AssetIdsJson = TriSoftic.GrowthEngine.Modules.Content.ContentVersion.ToJson([id, id]) }.AssetIds);   // stored once
+    }
+}

@@ -162,7 +162,7 @@ public sealed class ContentVersion : IOrganizationScoped
     public Guid? SourceDraftId { get; set; }
     /// <summary>The files attached to this exact version (JSON array of asset ids). Approval of a version covers these files and no others.</summary>
     public string AssetIdsJson { get; set; } = "[]";
-    public IReadOnlyList<Guid> AssetIds => System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(AssetIdsJson) ?? [];
+    public IReadOnlyList<Guid> AssetIds => AssetIdsJson.StartsWith('[') ? System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(AssetIdsJson) ?? [] : [];   // a value that is not a list means "no files"
     public static string ToJson(IEnumerable<Guid> ids) => System.Text.Json.JsonSerializer.Serialize(ids.Distinct().ToList());
     public Guid? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
