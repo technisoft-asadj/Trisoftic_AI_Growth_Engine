@@ -1,4 +1,4 @@
-# Progress log
+﻿# Progress log
 
 Last updated: 2026-11-15 (overnight autonomous run). Source of truth for scope/order: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
@@ -67,11 +67,11 @@ Tests: 17 unit + 7 architecture + 35 integration (real Postgres via Testcontaine
 | 4.7 | Budget planner (rules, not a language model, so every number traces to recorded data): with thin or no history it returns a small capped **learning experiment** with stop/go rules and no forecast; with enough history (>= 6 weeks and >= 30 results per channel) three scenarios with ranges, assumptions, uncertainty, evidence and confidence (never "High"); other currencies are excluded, not converted; adopting a scenario records Recommended figures only | Done and tested. No AI narrative layer; it can be added on top without changing the numbers |
 | 4.9 | AI usage/cost breakdown (`GET /api/v1/ai/usage/breakdown?month=2026-11`): by provider+model (with tokens), product and purpose; each grouping sums to the same total; failed/blocked calls shown as "not charged". Costs are estimates from token counts. Shown on the Budget page | Done and tested |
 
-Tests at last run: 136 unit + 17 architecture + 138 integration = **291 passing**. Web typecheck and build pass; the web app has still never been opened in a browser.
+Tests at last run: 136 unit + 17 architecture + 138 integration = **291 passing**. Web typecheck and build pass; the web app was driven in headless Edge (see Production deployment).
 
 ## Next steps when work resumes (in order)
 
-1. Phase 5-6 per IMPLEMENTATION_PLAN.md (needs real data first). Also the outstanding gaps: real Facebook/SMTP/n8n/Bedrock-5.x verification, S3 storage, CI run, merge undo, saved segments, contact/company create forms, browser check of the whole web app.
+1. Phase 5-6 per IMPLEMENTATION_PLAN.md (needs real data first). Also the outstanding gaps: real Facebook/SMTP/n8n/Bedrock-5.x verification, S3 storage, CI run, merge undo, saved segments, contact/company create forms, a deeper browser pass over the CRM, content and automation screens.
 Note: contacts, consent, leads and pipelines live in one `Crm` module (the plan listed CRM, Lead Management and Sales separately); they share transactions and one visibility rule, so splitting them would only add plumbing.
 
 ## Decisions made on your behalf (override any)
@@ -124,3 +124,6 @@ Secrets via env vars, e.g. `Ai__Anthropic__ApiKey`, `Ai__OpenAi__ApiKey` + `Ai__
 - `DataProtection:KeysPath=/keys` and `Storage:Root` are volumes shared by api and worker (the worker must decrypt tokens the api stored). Back up the `keys` volume: losing it makes stored provider tokens unreadable and every page connection must be redone.
 - TLS is not included: put Caddy or a load balancer in front of `web` and have it send `X-Forwarded-Proto`. `PUBLIC_BASE_URL` must be the public https address.
 - Not verified: behaviour with real SMTP/Facebook/Bedrock credentials; a harmless `libgssapi_krb5` warning appears in logs.
+
+- Browser check (headless Edge against the compose stack): signed in, all 10 pages render with no page errors; created a product and a budget, requested launch, approved it, recorded spend, saw an over-cap spend refused, generated a planner learning experiment. Scripts were throwaway (not committed). CRM, content, automation and publishing screens were only loaded, not exercised.
+

@@ -122,6 +122,17 @@ function BudgetDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const [reason, setReason] = useState(''); const [newCap, setNewCap] = useState('')
   const [sp, setSp] = useState({ kind: 'Actual', amount: '', allocationId: '', note: '' })
   const change = useMutation({ mutationFn: (b: { kind: string; proposedCap?: number }) => api.post(`/api/v1/budget/budgets/${id}/changes`, { ...b, reason }), onSuccess: () => { setReason(''); setNewCap(''); refresh() } })
+  const [realloc, setRealloc] = useState('')
+  const reallocate = useMutation({
+    mutationFn: () => {
+      const allocations = realloc.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+        const i = l.lastIndexOf(':')
+        return { label: l.slice(0, i).trim(), amount: Number(l.slice(i + 1)) }
+      })
+      return api.post(`/api/v1/budget/budgets/${id}/changes`, { kind: 'Reallocation', allocations, reason })
+    },
+    onSuccess: () => { setReason(''); setRealloc(''); refresh() },
+  })
   const withdraw = useMutation({ mutationFn: (cid: string) => api.post(`/api/v1/budget/changes/${cid}/withdraw`), onSuccess: refresh })
   const record = useMutation({
     mutationFn: () => api.post(`/api/v1/budget/budgets/${id}/spend`, { kind: sp.kind, amount: Number(sp.amount), allocationId: sp.allocationId || null, note: sp.note || null }),
@@ -181,7 +192,14 @@ function BudgetDetail({ id, onBack }: { id: string; onBack: () => void }) {
             )}
           </div>
         )}
-        {(err(change.error) || err(withdraw.error)) && <p className="error" role="alert">{err(change.error) ?? err(withdraw.error)}</p>}
+        {canPropose && !pending && b.status === 'Approved' && (
+          <div className="row">
+            <label>Reallocate (one “Line: amount” per row; must add up within the cap)
+              <textarea rows={4} value={realloc} placeholder={b.allocations.map((a) => `${a.label}: ${a.amount}`).join('\n')} onChange={(e) => setRealloc(e.target.value)} /></label>
+            <button disabled={reason.trim().length < 3 || !realloc.includes(':') || reallocate.isPending} onClick={() => reallocate.mutate()}>Request reallocation</button>
+          </div>
+        )}
+        {(err(change.error) || err(withdraw.error) || err(reallocate.error)) && <p className="error" role="alert">{err(change.error) ?? err(withdraw.error) ?? err(reallocate.error)}</p>}
       </div>
 
       <div className="card">
