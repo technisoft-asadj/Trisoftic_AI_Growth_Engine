@@ -14,6 +14,7 @@ import { AutomationPage } from './pages/Automation.tsx'
 import { ConnectPage, PublishingPage } from './pages/Publishing.tsx'
 import { AnalyticsPage } from './pages/Analytics.tsx'
 import { BudgetPage } from './pages/Budget.tsx'
+import { AccountPage } from './pages/Account.tsx'
 
 export default function App() {
   const { me, loading, can, logout } = useAuth()
@@ -43,7 +44,7 @@ export default function App() {
           {(can('audit.read') || can('jobs.manage') || can('governance.pause')) && <NavLink to="/admin">Admin</NavLink>}
         </nav>
         <span className="spacer" />
-        <span className="muted">{me.displayName} · {me.roles.join(', ')}</span>
+        <NavLink to="/account" className="muted">{me.displayName} · {me.roles.join(', ')}</NavLink>
         <button className="link" onClick={() => void logout()}>Sign out</button>
       </header>
       <main>
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="/publishing" element={<PublishingPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/budget" element={<BudgetPage />} />
+          <Route path="/account" element={<AccountPage />} />
           <Route path="/publishing/connect" element={<ConnectPage />} />
           <Route path="/automation" element={<AutomationPage />} />
           <Route path="/approvals"element={<ApprovalsPage />} />

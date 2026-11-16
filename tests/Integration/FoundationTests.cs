@@ -40,6 +40,26 @@ public sealed class FoundationTests(TestHost host)
     }
 
     [Fact]
+    public async Task Users_can_change_their_own_password()
+    {
+        var admin = await host.LoginAdminAsync();
+        var email = $"pw-{Guid.NewGuid():N}@example.test";
+        const string oldPw = "Old-Passw0rd-123!", newPw = "New-Passw0rd-456!";
+        var create = await admin.PostAsJsonAsync("/api/v1/users", new { email, displayName = "Pw Test", password = oldPw, roles = new[] { "Read-only Viewer" }, allProducts = true });
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+
+        var me = await host.LoginAsync(email, oldPw);
+        Assert.Equal(HttpStatusCode.BadRequest, (await me.PostAsJsonAsync("/api/v1/auth/change-password", new { currentPassword = "wrong-wrong-1A!", newPassword = newPw })).StatusCode);   // wrong current
+        Assert.Equal(HttpStatusCode.BadRequest, (await me.PostAsJsonAsync("/api/v1/auth/change-password", new { currentPassword = oldPw, newPassword = "short" })).StatusCode);              // policy
+        Assert.Equal(HttpStatusCode.NoContent, (await me.PostAsJsonAsync("/api/v1/auth/change-password", new { currentPassword = oldPw, newPassword = newPw })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await me.GetAsync("/api/v1/auth/me")).StatusCode);                                   // this session stays signed in
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await host.NewClient().PostAsJsonAsync("/api/v1/auth/login", new { email, password = oldPw })).StatusCode);
+        await host.LoginAsync(email, newPw);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await host.NewClient().PostAsJsonAsync("/api/v1/auth/change-password", new { currentPassword = oldPw, newPassword = newPw })).StatusCode);   // anonymous
+    }
+
+    [Fact]
     public async Task Correlation_id_is_echoed()
     {
         var c = host.NewClient();

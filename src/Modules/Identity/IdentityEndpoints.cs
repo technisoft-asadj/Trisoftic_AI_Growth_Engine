@@ -13,6 +13,7 @@ namespace TriSoftic.GrowthEngine.Modules.Identity;
 public static class IdentityEndpoints
 {
     public sealed record LoginRequest(string Email, string Password);
+    public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
     public sealed record MeDto(Guid Id, string Email, string DisplayName, string[] Roles, string[] Permissions, bool AllProducts, Guid[] ProductIds);
     public sealed record UserDto(Guid Id, string Email, string DisplayName, bool IsActive, bool AllProducts, string[] Roles, Guid[] ProductIds);
     public sealed record CreateUserRequest(string Email, string DisplayName, string Password, string[] Roles, bool AllProducts, Guid[]? ProductIds);
@@ -35,6 +36,23 @@ public static class IdentityEndpoints
 
         auth.MapPost("/logout", async (SignInManager<ApplicationUser> signIn) => { await signIn.SignOutAsync(); return Results.NoContent(); })
             .RequireAuthorization();
+
+        // Signed-in users change their own password. Other sessions are signed out (the security stamp changes); this one stays signed in.
+        auth.MapPost("/change-password", async (ChangePasswordRequest req, ICurrentUser cu, UserManager<ApplicationUser> users, SignInManager<ApplicationUser> signIn, IAuditWriter audit) =>
+        {
+            var user = await users.FindByIdAsync(cu.UserId!.Value.ToString());
+            if (user is null || !user.IsActive) return Results.Unauthorized();
+            if (string.IsNullOrEmpty(req.CurrentPassword) || string.IsNullOrEmpty(req.NewPassword)) return Results.Problem(statusCode: 400, title: "Enter your current and new password");
+            var r = await users.ChangePasswordAsync(user, req.CurrentPassword, req.NewPassword);
+            if (!r.Succeeded)
+            {
+                var wrong = r.Errors.Any(e => e.Code == "PasswordMismatch");
+                return Results.Problem(statusCode: 400, title: wrong ? "The current password is not correct" : "The new password is not allowed", extensions: new Dictionary<string, object?> { ["errors"] = r.Errors.Where(e => e.Code != "PasswordMismatch").Select(e => e.Description).ToArray() });
+            }
+            await signIn.RefreshSignInAsync(user);
+            await audit.WriteAsync(new AuditEntry("identity.password-changed", "User", user.Id.ToString(), null, user.Email), default);
+            return Results.NoContent();
+        }).RequireAuthorization();
 
         auth.MapGet("/me", async (ICurrentUser cu, UserManager<ApplicationUser> users, IHttpContextAccessor ctx, CancellationToken ct) =>
         {
