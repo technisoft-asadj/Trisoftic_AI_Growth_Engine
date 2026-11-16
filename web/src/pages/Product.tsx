@@ -5,6 +5,7 @@ import { api, ApiError, type AssetItem, type Fact, type Claim, type Grounded, ty
 import { useAuth } from '../auth.tsx'
 import { StrategiesTab } from './Strategies.tsx'
 import { CampaignsTab, ContentTab } from './Content.tsx'
+import { PlansTab } from './Plans.tsx'
 
 const emptyProfile = (): Profile => ({ summary: '', facts: [], claims: [], markets: [], platforms: [], personas: [], brandVoice: { dos: [], donts: [] }, links: [], competitors: [] })
 const lines = (t: string) => t.split('\n').map((s) => s.trim()).filter(Boolean)
@@ -35,6 +36,7 @@ export function ProductPage() {
         <NavLink to={`/products/${p.id}/profile`}>Profile</NavLink>
         {can('assets.read') && <NavLink to={`/products/${p.id}/assets`}>Assets</NavLink>}
         {can('products.read') && <NavLink to={`/products/${p.id}/strategies`}>Strategies</NavLink>}
+        {can('products.read') && <NavLink to={`/products/${p.id}/plans`}>Plans</NavLink>}
         {can('products.read') && <NavLink to={`/products/${p.id}/campaigns`}>Campaigns</NavLink>}
         {can('products.read') && <NavLink to={`/products/${p.id}/content`}>Content</NavLink>}
         {can('ai.generate') && <NavLink to={`/products/${p.id}/generate`}>AI studio</NavLink>}
@@ -46,6 +48,7 @@ export function ProductPage() {
         <Route path="strategies" element={<StrategiesRoute productId={p.id} />} />
         <Route path="campaigns" element={<CampaignsTab productId={p.id} />} />
         <Route path="content" element={<ContentTab productId={p.id} />} />
+        <Route path="plans/*" element={<PlansTab productId={p.id} />} />
         <Route path="generate" element={<GenerateTab product={p} />} />
       </Routes>
     </>

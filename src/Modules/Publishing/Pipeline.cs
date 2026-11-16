@@ -230,6 +230,8 @@ public sealed class PullPostMetricsHandler(PublishingDbContext db, IEnumerable<I
     public string Type => PullJob;
     public PauseScope? PauseScope => null;   // read-only
 
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
+
     public async Task HandleAsync(JobContext c, CancellationToken ct)
     {
         var now = clock.UtcNow;
@@ -252,7 +254,12 @@ public sealed class PullPostMetricsHandler(PublishingDbContext db, IEnumerable<I
                 touchedProducts.Add(post.ProductId);
             }
             catch (PublishException ex) when (ex.Kind is PublishErrorKind.Retryable or PublishErrorKind.Unknown) { failure ??= new TransientJobException($"Post figures for '{account.DisplayName}': {ex.Message}", ex.RetryAfter); }
-            catch (PublishException) { /* auth or permanent: the token check flags the account; nothing is recorded, so nothing looks fresh */ }
+            catch (PublishException ex)
+            {
+                // Auth or permanent: nothing can be measured. Keep the reason with the post (all figures empty) so the page can say why; the token check flags a bad account.
+                db.Snapshots.Add(new PostMetricSnapshot { PublishedPostId = post.Id, ProductId = post.ProductId, TakenAt = now, Note = Truncate("Facebook refused the request for this post's figures: " + ex.Message, 500) });
+                await db.SaveChangesAsync(ct);
+            }
             catch (System.Security.Cryptography.CryptographicException) { /* unreadable token: flagged by the token check */ }
         }
         if (sink is not null) foreach (var productId in touchedProducts) await RollUpAsync(productId, posts.Where(p => p.ProductId == productId).ToList(), accounts, now, ct);

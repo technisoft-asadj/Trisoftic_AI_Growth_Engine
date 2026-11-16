@@ -106,7 +106,7 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
 
     // ---- OAuth ----
     public string AuthorizeUrl(string state)
-        => $"https://www.facebook.com/{Version}/dialog/oauth?client_id={Uri.EscapeDataString(AppId)}&redirect_uri={Uri.EscapeDataString(RedirectUri)}&state={Uri.EscapeDataString(state)}&scope=pages_show_list,pages_manage_posts,pages_read_engagement,read_insights";
+        => $"https://www.facebook.com/{Version}/dialog/oauth?client_id={Uri.EscapeDataString(AppId)}&redirect_uri={Uri.EscapeDataString(RedirectUri)}&state={Uri.EscapeDataString(state)}&scope=pages_show_list,pages_manage_posts,pages_read_engagement,pages_read_user_content,read_insights";
 
     public async Task<string> ExchangeCodeAsync(string code, CancellationToken ct)
     {
@@ -147,8 +147,10 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
         return null;
     }
 
-    // Engagement counts need only pages_read_engagement. Views, reach and clicks need read_insights, and Meta renames its metrics from time to time,
-    // so each is asked for separately with fallbacks: one that is refused or retired leaves that figure empty instead of failing the rest.
+    // Every figure is asked for on its own, so one that Facebook refuses leaves only that figure empty (with the reason noted) and never blanks the rest.
+    //   reactions, comments:  need pages_read_user_content (or Page Public Content Access)
+    //   shares:               pages_read_engagement
+    //   views, reach, clicks: read_insights. Meta renames its metrics from time to time, so each has fallback names.
     private static readonly string[] ViewMetrics = ["post_media_view", "post_impressions"];
     private static readonly string[] ReachMetrics = ["post_total_media_view_unique", "post_impressions_unique"];
     private static readonly string[] ClickMetrics = ["post_clicks"];
@@ -156,14 +158,31 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
     public async Task<PostMetrics?> GetPostMetricsAsync(PostRequest account, string providerPostId, CancellationToken ct)
     {
         var token = Uri.EscapeDataString(account.AccessToken);
-        var basic = await GetJson($"{Base}/{providerPostId}?fields=reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0),shares&access_token={token}", ct);
-        static int? Total(JsonElement e, string name) => e.TryGetProperty(name, out var o) && o.TryGetProperty("summary", out var s) && s.TryGetProperty("total_count", out var t) ? t.GetInt32() : null;
-        var reactions = Total(basic, "reactions"); var comments = Total(basic, "comments");
-        int? shares = reactions is null && comments is null ? null : (basic.TryGetProperty("shares", out var sh) && sh.TryGetProperty("count", out var c) ? c.GetInt32() : 0);   // Facebook leaves "shares" out when there are none
+        var missing = new List<string>(); string? firstReason = null;
+        void Missing(string label, PublishException ex) { missing.Add(label); firstReason ??= ex.Message.Length > 220 ? ex.Message[..220] : ex.Message; }
 
-        var missing = new List<string>();
+        async Task<int?> Count(string label, string field)
+        {
+            try
+            {
+                var res = await GetJson($"{Base}/{providerPostId}?fields={field}.summary(total_count).limit(0)&access_token={token}", ct);
+                return res.TryGetProperty(field, out var o) && o.TryGetProperty("summary", out var s) && s.TryGetProperty("total_count", out var t) ? t.GetInt32() : null;
+            }
+            catch (PublishException ex) when (ex.Kind is PublishErrorKind.Permanent or PublishErrorKind.AuthExpired) { Missing(label, ex); return null; }
+        }
+        var reactions = await Count("reactions", "reactions"); var comments = await Count("comments", "comments");
+
+        int? shares = null;
+        try
+        {
+            var res = await GetJson($"{Base}/{providerPostId}?fields=shares&access_token={token}", ct);
+            shares = res.TryGetProperty("shares", out var sh) && sh.TryGetProperty("count", out var c) ? c.GetInt32() : 0;   // Facebook leaves "shares" out when there are none
+        }
+        catch (PublishException ex) when (ex.Kind is PublishErrorKind.Permanent or PublishErrorKind.AuthExpired) { Missing("shares", ex); }
+
         async Task<long?> Insight(string label, string[] candidates)
         {
+            PublishException? last = null;
             foreach (var metric in candidates)
             {
                 try
@@ -172,13 +191,14 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
                     foreach (var row in res.GetProperty("data").EnumerateArray())
                         if (row.TryGetProperty("values", out var vals) && vals.GetArrayLength() > 0 && vals[0].TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.Number) return v.GetInt64();
                 }
-                catch (PublishException ex) when (ex.Kind == PublishErrorKind.Permanent) { /* refused or retired metric: try the next name */ }
+                catch (PublishException ex) when (ex.Kind is PublishErrorKind.Permanent or PublishErrorKind.AuthExpired) { last = ex; }   // refused or retired metric: try the next name
             }
-            missing.Add(label);
+            Missing(label, last ?? new PublishException(PublishErrorKind.Permanent, "no value returned yet (the post may be too new)"));
             return null;
         }
         var views = await Insight("views", ViewMetrics); var reach = await Insight("reach", ReachMetrics); var clicks = await Insight("clicks", ClickMetrics);
-        var note = missing.Count == 0 ? null : $"Facebook did not supply {string.Join(", ", missing)} (the connection may lack the read_insights permission, or the post is too new).";
+
+        var note = missing.Count == 0 ? null : $"Facebook did not supply {string.Join(", ", missing)}. First reason: {firstReason}";
         return new PostMetrics(reactions, comments, shares, views, reach, (int?)clicks, note);
     }
 
