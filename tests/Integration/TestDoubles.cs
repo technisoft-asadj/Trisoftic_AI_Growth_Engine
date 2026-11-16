@@ -68,7 +68,7 @@ public sealed class ScriptedPublisher : TriSoftic.GrowthEngine.Modules.Publishin
 
     public string Provider => "sandbox";
     public int MaxTextLength => 400;
-    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post", "Story"];
+    public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post", "Story", "Reel"];
 
     /// <summary>What the "network" was handed for each post (keyed by its text): the format and every file, with its bytes read back from storage.</summary>
     public static readonly ConcurrentDictionary<string, (string Format, List<(string Name, string Type, byte[] Bytes)> Files)> Sent = new();

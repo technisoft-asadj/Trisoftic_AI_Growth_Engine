@@ -59,7 +59,7 @@ export interface Profile {
 }
 export interface ProfileVersion { id: string; number: number; status: string; changeNote?: string; decisionComment?: string; content: Profile }
 export interface Approval { id: string; subjectType: string; subjectId: string; subjectVersion: number; title: string; status: string; requestedAt: string; decisionComment?: string; canDecide: boolean; productId?: string }
-export interface AssetItem { id: string; name: string; kind: string; version: number; contentType: string; sizeBytes: number; source: string; rights: string; isSynthetic: boolean }
+export interface AssetItem { id: string; name: string; kind: string; version: number; contentType: string; sizeBytes: number; source: string; rights: string; isSynthetic: boolean; durationSeconds?: number | null; width?: number | null; height?: number | null }
 export interface AuditItem { id: string; occurredAt: string; actorEmail?: string; action: string; subjectType: string; summary?: string }
 export interface JobItem { id: string; type: string; status: string; attempts: number; maxAttempts: number; lastError?: string; runAt: string }
 export interface PauseItem { scope: string; isPaused: boolean; reason?: string }

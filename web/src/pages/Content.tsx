@@ -57,7 +57,7 @@ export function ContentTab({ productId }: { productId: string }) {
             <label>Campaign<select value={f.campaignId} onChange={(e) => setF({ ...f, campaignId: e.target.value })}><option value="">None</option>{campaigns.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
           </div>
           <label>Text<textarea rows={6} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} /></label>
-          <MediaPicker productId={productId} value={f.assetIds} onChange={(assetIds) => setF({ ...f, assetIds })} />
+          <MediaPicker productId={productId} format={f.format} value={f.assetIds} onChange={(assetIds) => setF({ ...f, assetIds })} />
           <button type="submit" disabled={create.isPending}>Create draft</button>
           <Err e={create.error} />
         </form>
@@ -105,7 +105,7 @@ function EditorBody({ d, onBack }: { d: ItemDetail; onBack: () => void }) {
       <form className="card" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate() }}>
         <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} disabled={!canWrite} /></label>
         <label>Text<textarea rows={12} value={body} onChange={(e) => setBody(e.target.value)} disabled={!canWrite} /></label>
-        <MediaPicker productId={it.productId} value={assetIds} onChange={setAssetIds} disabled={!canWrite} />
+        <MediaPicker productId={it.productId} format={it.format} value={assetIds} onChange={setAssetIds} disabled={!canWrite} />
         {canWrite && (
           <div className="row">
             <label>What changed?<input value={note} onChange={(e) => setNote(e.target.value)} /></label>
@@ -223,7 +223,13 @@ export function CalendarPage() {
 // ---------------- media picker ----------------
 
 /** Choose the images or video that go out with a post. The order of selection is the order they are posted in. */
-function MediaPicker({ productId, value, onChange, disabled }: { productId: string; value: string[]; onChange: (v: string[]) => void; disabled?: boolean }) {
+const formatHint: Record<string, string> = {
+  Post: 'A post can carry up to 10 images, or one video.',
+  Story: 'A story needs exactly one image, or one vertical (9:16) MP4 video of 3 to 60 seconds.',
+  Reel: 'A reel needs exactly one vertical (9:16) MP4 video of 3 to 90 seconds, at least 540x960. Export it from your video editor at 1080x1920.',
+}
+
+function MediaPicker({ productId, format, value, onChange, disabled }: { productId: string; format?: string; value: string[]; onChange: (v: string[]) => void; disabled?: boolean }) {
   const assets = useQuery({ queryKey: ['assets', productId], queryFn: () => api.get<AssetItem[]>(`/api/v1/products/${productId}/assets`) })
   const usable = (assets.data ?? []).filter((a) => a.contentType.startsWith('image/') || a.contentType.startsWith('video/'))
   const toggle = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id])
@@ -239,13 +245,13 @@ function MediaPicker({ productId, value, onChange, disabled }: { productId: stri
             <label key={a.id} style={{ width: 140, cursor: disabled ? 'default' : 'pointer', opacity: a.rights === 'InternalOnly' ? 0.5 : 1 }} title={a.rights === 'InternalOnly' ? 'Marked internal-only: cannot be published' : a.name}>
               {a.contentType.startsWith('image/')
                 ? <img src={`/api/v1/assets/${a.id}/content`} alt={a.name} style={{ width: 140, height: 100, objectFit: 'cover', borderRadius: 6, outline: n >= 0 ? '3px solid var(--accent, #6366f1)' : 'none' }} />
-                : <div style={{ width: 140, height: 100, display: 'grid', placeItems: 'center', background: 'rgba(128,128,128,.2)', borderRadius: 6, outline: n >= 0 ? '3px solid var(--accent, #6366f1)' : 'none' }}>▶ video</div>}
+                : <div style={{ width: 140, height: 100, display: 'grid', placeItems: 'center', background: 'rgba(128,128,128,.2)', borderRadius: 6, outline: n >= 0 ? '3px solid var(--accent, #6366f1)' : 'none', textAlign: 'center' }}>▶ video<br /><span className="muted">{a.durationSeconds != null && a.width != null && a.height != null ? `${Math.round(a.durationSeconds)} s · ${a.width}×${a.height}` : 'size unknown'}</span></div>}
               <div><input type="checkbox" checked={n >= 0} disabled={disabled} onChange={() => toggle(a.id)} /> {n >= 0 && <b>{n + 1}. </b>}<span className="muted">{a.name}</span></div>
             </label>
           )
         })}
       </div>
-      {value.length > 0 && <p className="muted">{value.length} file{value.length > 1 ? 's' : ''} attached. A post can carry up to 10 images, or one video. A story needs exactly one image. Attaching files means the approval covers exactly these files.</p>}
+      <p className="muted">{formatHint[format ?? 'Post'] ?? 'This format cannot carry images or video.'}{value.length > 0 && <> {value.length} file{value.length > 1 ? 's' : ''} attached; the approval covers exactly these files.</>}</p>
     </fieldset>
   )
 }

@@ -37,8 +37,14 @@ namespace TriSoftic.GrowthEngine.Modules.Assets.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<double?>("DurationSeconds")
+                        .HasColumnType("double precision");
+
                     b.Property<Guid>("GroupId")
                         .HasColumnType("uuid");
+
+                    b.Property<int?>("Height")
+                        .HasColumnType("integer");
 
                     b.Property<bool>("IsRetired")
                         .HasColumnType("boolean");
@@ -100,6 +106,9 @@ namespace TriSoftic.GrowthEngine.Modules.Assets.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Width")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");

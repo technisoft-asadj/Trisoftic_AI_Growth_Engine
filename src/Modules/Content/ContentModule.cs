@@ -13,7 +13,7 @@ namespace TriSoftic.GrowthEngine.Modules.Content;
 
 public static class ContentModule
 {
-    public static readonly string[] Formats = ["Post", "Carousel", "Script", "Storyboard", "CreativeBrief", "ImagePrompt", "DemoScript", "Blog", "SeoDraft", "LandingCopy", "AdVariant", "Email", "Story"];
+    public static readonly string[] Formats = ["Post", "Carousel", "Script", "Storyboard", "CreativeBrief", "ImagePrompt", "DemoScript", "Blog", "SeoDraft", "LandingCopy", "AdVariant", "Email", "Story", "Reel"];
 
     public static IServiceCollection AddContentModule(this IServiceCollection s, IConfiguration c)
     {

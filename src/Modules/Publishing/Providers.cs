@@ -137,9 +137,19 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
         var media = r.Media ?? [];
         var page = r.ExternalId;
         string id;
-        if (r.Format == "Story")
+        if (r.Format == "Reel")
         {
-            if (media.Count != 1 || media[0].IsVideo) throw new PublishException(PublishErrorKind.Permanent, "A story needs exactly one image.");
+            if (media.Count != 1 || !media[0].IsVideo) throw new PublishException(PublishErrorKind.Permanent, "A reel needs exactly one video.");
+            id = (await UploadVideoThroughSession(page, "video_reels", r.AccessToken, media[0], r.Text, publishNow: true, ct)).Id;
+        }
+        else if (r.Format == "Story" && media.Count == 1 && media[0].IsVideo)
+        {
+            var done = await UploadVideoThroughSession(page, "video_stories", r.AccessToken, media[0], null, publishNow: false, ct);
+            id = done.PostId ?? done.Id;
+        }
+        else if (r.Format == "Story")
+        {
+            if (media.Count != 1) throw new PublishException(PublishErrorKind.Permanent, "A story needs exactly one image or one video.");
             var photoId = (await UploadPhoto(page, r.AccessToken, media[0], null, published: false, ct)).Id;
             var res = await Send(() => http.CreateClient("facebook").PostAsync($"{Base}/{page}/photo_stories", new FormUrlEncodedContent(new Dictionary<string, string> { ["photo_id"] = photoId, ["access_token"] = r.AccessToken }), ct), ct);
             id = res.TryGetProperty("post_id", out var pid) ? pid.GetString() ?? photoId : photoId;
@@ -174,6 +184,50 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
         return new PostResult(id, url is null ? null : (url.StartsWith("http") ? url : "https://www.facebook.com" + url));
     }
 
+    /// <summary>
+    /// Reels and video stories use the same three steps: ask Facebook for an upload session, send the file to the upload address it returns (streamed, never held in memory),
+    /// then finish. Facebook processes the video afterwards, so the status is checked for a short while to catch an immediate rejection.
+    /// There is no idempotency key on this flow: a failure after "finish" is therefore checked against the Page's videos before any retry (see <see cref="FindRecentAsync"/>).
+    /// </summary>
+    private async Task<Uploaded> UploadVideoThroughSession(string page, string edge, string token, MediaFile video, string? description, bool publishNow, CancellationToken ct)
+    {
+        var start = await Send(() => http.CreateClient("facebook").PostAsync($"{Base}/{page}/{edge}", new FormUrlEncodedContent(new Dictionary<string, string> { ["upload_phase"] = "start", ["access_token"] = token }), ct), ct);
+        var videoId = start.TryGetProperty("video_id", out var vid) ? vid.GetString() : null;
+        if (string.IsNullOrEmpty(videoId)) throw new PublishException(PublishErrorKind.Unknown, "Facebook did not open an upload session");
+        var uploadUrl = start.TryGetProperty("upload_url", out var up) && !string.IsNullOrEmpty(up.GetString()) ? up.GetString()! : $"https://rupload.facebook.com/video-upload/{Version}/{videoId}";
+
+        await Send(async () =>
+        {
+            await using var stream = await video.Open(ct);
+            using var content = new StreamContent(stream); content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            using var req = new HttpRequestMessage(HttpMethod.Post, uploadUrl) { Content = content };
+            req.Headers.TryAddWithoutValidation("Authorization", "OAuth " + token); req.Headers.TryAddWithoutValidation("offset", "0"); req.Headers.TryAddWithoutValidation("file_size", video.Size.ToString());
+            return await http.CreateClient("facebook-upload").SendAsync(req, ct);
+        }, ct);
+
+        var fields = new Dictionary<string, string> { ["upload_phase"] = "finish", ["video_id"] = videoId, ["access_token"] = token };
+        if (publishNow) { fields["video_state"] = "PUBLISHED"; if (!string.IsNullOrWhiteSpace(description)) fields["description"] = description; }
+        var fin = await Send(() => http.CreateClient("facebook").PostAsync($"{Base}/{page}/{edge}", new FormUrlEncodedContent(fields), ct), ct);
+        if (fin.TryGetProperty("success", out var ok) && ok.ValueKind == JsonValueKind.False) throw new PublishException(PublishErrorKind.Permanent, "Facebook did not accept the finished upload");
+
+        for (var i = 0; i < 6; i++)   // up to ~30 s: enough to see an immediate processing failure; a long video may legitimately still be processing
+        {
+            try
+            {
+                var st = await GetJson($"{Base}/{videoId}?fields=status&access_token={Uri.EscapeDataString(token)}", ct);
+                if (st.TryGetProperty("status", out var s) && s.TryGetProperty("video_status", out var vs))
+                {
+                    var state = vs.GetString();
+                    if (state == "error") throw new PublishException(PublishErrorKind.Permanent, "Facebook could not process the video: " + (s.TryGetProperty("processing_phase", out var pp) && pp.TryGetProperty("error", out var pe) && pe.TryGetProperty("message", out var pm) ? pm.GetString() : "no reason given"));
+                    if (state == "ready") break;
+                }
+            }
+            catch (PublishException ex) when (ex.Kind is PublishErrorKind.Retryable or PublishErrorKind.Unknown) { /* a hiccup while polling must not undo an upload that succeeded */ }
+            await Task.Delay(TimeSpan.FromSeconds(5), ct);
+        }
+        return new Uploaded(videoId, fin.TryGetProperty("post_id", out var pid) ? pid.GetString() : null);
+    }
+
     private sealed record Uploaded(string Id, string? PostId);
 
     private async Task<Uploaded> UploadPhoto(string page, string token, MediaFile file, string? caption, bool published, CancellationToken ct)
@@ -201,6 +255,16 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
     {
         // A story has no text and Facebook offers no reliable way to look one up, so after an uncertain failure it is not retried blindly: a person checks the Page.
         if (r.Format == "Story") throw new PublishException(PublishErrorKind.Permanent, "The story may or may not have been posted and cannot be checked automatically. Look at the Page's story: if it is there use 'mark as published', otherwise retry.");
+        if (r.Format == "Reel")
+        {
+            // Reels are listed with the Page's videos, with the reel's text as the description.
+            var vids = await GetJson($"{Base}/{r.ExternalId}/videos?fields=id,description,created_time,permalink_url&limit=10&access_token={Uri.EscapeDataString(r.AccessToken)}", ct);
+            foreach (var v in vids.GetProperty("data").EnumerateArray())
+                if (v.TryGetProperty("description", out var d) && d.GetString() == r.Text
+                    && v.TryGetProperty("created_time", out var vt) && DateTimeOffset.TryParse(vt.GetString(), out var vat) && DateTimeOffset.UtcNow - vat < TimeSpan.FromMinutes(30))
+                    return new PostResult(v.GetProperty("id").GetString()!, v.TryGetProperty("permalink_url", out var vu) ? vu.GetString() : null);
+            return null;
+        }
         var res = await GetJson($"{Base}/{r.ExternalId}/posts?fields=id,message,created_time,permalink_url&limit=10&access_token={Uri.EscapeDataString(r.AccessToken)}", ct);
         foreach (var p in res.GetProperty("data").EnumerateArray())
         {

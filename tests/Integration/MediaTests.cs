@@ -158,4 +158,79 @@ public sealed class MediaTests(TestHost host)
         var mixed = await CreateAsync(admin, pid, "Mixed " + Uniq(), "Post", video, img);
         Assert.Equal(HttpStatusCode.BadRequest, mixed.StatusCode); Assert.Contains("not both", await mixed.Content.ReadAsStringAsync());
     }
+
+    // ---- a minimal but valid MP4 index with the given picture size and length (the video data itself is junk: only the header is read) ----
+    private static byte[] Box(string type, params byte[][] parts)
+    {
+        var body = parts.SelectMany(p => p).ToArray(); var b = new byte[8 + body.Length];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(b, (uint)b.Length); System.Text.Encoding.ASCII.GetBytes(type).CopyTo(b, 4); body.CopyTo(b, 8); return b;
+    }
+    private static byte[] U32(uint v) { var b = new byte[4]; System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(b, v); return b; }
+    private static byte[] Clip(int w, int h, uint seconds, byte marker)
+    {
+        var matrix = new byte[36]; System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(matrix.AsSpan(0), 0x10000); System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(matrix.AsSpan(32), 0x40000000);
+        var tkhd = Box("tkhd", new byte[4], new byte[8], U32(1), new byte[4], new byte[4], new byte[8], new byte[8], matrix, U32((uint)w << 16), U32((uint)h << 16));
+        var hdlr = Box("hdlr", new byte[4], new byte[4], System.Text.Encoding.ASCII.GetBytes("vide"), new byte[12], new byte[1]);
+        var moov = Box("moov", Box("mvhd", new byte[4], new byte[8], U32(1000), U32(seconds * 1000), new byte[80]), Box("trak", tkhd, Box("mdia", hdlr)));
+        return [.. Box("ftyp", System.Text.Encoding.ASCII.GetBytes("mp42"), new byte[4], System.Text.Encoding.ASCII.GetBytes("mp42isom")), .. Box("mdat", Enumerable.Repeat(marker, 3000).ToArray()), .. moov];
+    }
+
+    private static async Task<(Guid Id, JsonElement Dto)> UploadClipAsync(HttpClient admin, Guid pid, byte[] bytes, string name)
+    {
+        var f = new MultipartFormDataContent();
+        var file = new ByteArrayContent(bytes); file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        f.Add(file, "file", name); f.Add(new StringContent("GameplayFootage"), "kind"); f.Add(new StringContent("Own"), "source"); f.Add(new StringContent("Unrestricted"), "rights");
+        var up = await admin.PostAsync($"/api/v1/products/{pid}/assets", f); Assert.Equal(HttpStatusCode.Created, up.StatusCode);
+        var dto = await up.Content.ReadFromJsonAsync<JsonElement>(Json);
+        return (dto.GetProperty("id").GetGuid(), dto);
+    }
+
+    [Fact]
+    public async Task Reels_and_video_stories_are_checked_against_the_files_real_size_and_length_then_handed_to_the_network_intact()
+    {
+        var before = Clock.UtcNow;
+        try { await ReelsAsync(); } finally { Clock.Set(before); }
+    }
+
+    private async Task ReelsAsync()
+    {
+        var admin = await host.LoginAdminAsync(); var approver = await UserAsync(admin, "Approver"); var pid = await ProductAsync(admin);
+
+        // the size and length are read from the file when it is uploaded
+        var good = Clip(1080, 1920, 20, 11);
+        var (goodId, dto) = await UploadClipAsync(admin, pid, good, "good.mp4");
+        Assert.Equal(1080, dto.GetProperty("width").GetInt32()); Assert.Equal(1920, dto.GetProperty("height").GetInt32()); Assert.Equal(20d, dto.GetProperty("durationSeconds").GetDouble());
+        var (landscapeId, _) = await UploadClipAsync(admin, pid, Clip(1920, 1080, 20, 12), "landscape.mp4");
+        var (longId, _) = await UploadClipAsync(admin, pid, Clip(1080, 1920, 120, 13), "long.mp4");
+        var (junkId, junk) = await UploadClipAsync(admin, pid, [0, 0, 0, 0x18, (byte)'f', (byte)'t', (byte)'y', (byte)'p', 1, 2, 3, 4, 5, 6, 7, 8], "junk.mp4");   // an MP4 with no readable index
+        Assert.Equal(JsonValueKind.Null, junk.GetProperty("width").ValueKind);                                       // unknown, not zero
+
+        // rules apply as soon as a clip is attached
+        var t = "Reel " + Uniq();
+        foreach (var bad in new[] { landscapeId, longId })
+            Assert.Equal(HttpStatusCode.BadRequest, (await CreateAsync(admin, pid, t, "Reel", bad)).StatusCode);
+        var unreadable = await CreateAsync(admin, pid, t, "Reel", junkId);
+        Assert.Equal(HttpStatusCode.BadRequest, unreadable.StatusCode); Assert.Contains("could not be read", await unreadable.Content.ReadAsStringAsync());
+        var img = await UploadAsync(admin, pid, Png(9), "pic.png");
+        Assert.Equal(HttpStatusCode.BadRequest, (await CreateAsync(admin, pid, t, "Reel", goodId, img)).StatusCode);   // a reel is one video only
+        var emptyDraft = await IdOf(await CreateAsync(admin, pid, "Empty reel " + Uniq(), "Reel"));                    // may start without the clip...
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsync($"/api/v1/content/{emptyDraft}/submit", null)).StatusCode);   // ...but cannot be submitted without it
+
+        // the same unreadable clip is fine as an ordinary video post (no shape rules there)
+        Assert.Equal(HttpStatusCode.Created, (await CreateAsync(admin, pid, "Plain " + Uniq(), "Post", junkId)).StatusCode);
+
+        // reel: approved, scheduled, handed over as a reel with the real bytes
+        var reel = await IdOf(await CreateAsync(admin, pid, t, "Reel", goodId));
+        await ApproveAsync(admin, approver, reel);
+        Assert.Equal("Published", await PublishAsync(admin, reel));
+        var sent = ScriptedPublisher.Sent[t];
+        Assert.Equal("Reel", sent.Format); Assert.Single(sent.Files); Assert.Equal("video/mp4", sent.Files[0].Type); Assert.Equal(good, sent.Files[0].Bytes);
+
+        // video story: no caption needed
+        var s = "Video story " + Uniq();
+        var story = await IdOf(await CreateAsync(admin, pid, s, "Story", goodId));
+        await ApproveAsync(admin, approver, story);
+        Assert.Equal("Published", await PublishAsync(admin, story));
+        Assert.Equal("Story", ScriptedPublisher.Sent[s].Format); Assert.Equal("video/mp4", ScriptedPublisher.Sent[s].Files.Single().Type);
+    }
 }
