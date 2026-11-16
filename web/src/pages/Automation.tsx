@@ -171,7 +171,8 @@ function Builder({ catalog, existing, onSaved }: { catalog: Catalog; existing?: 
           {s.kind === 'task' && <>
             <label>Title<input value={s.title ?? ''} onChange={(e) => setStep(i, { title: e.target.value })} /></label>
             <label>Due in (min)<input type="number" min={0} value={s.dueInMinutes ?? 0} onChange={(e) => setStep(i, { dueInMinutes: Number(e.target.value) })} /></label>
-            <label>Assign to<input value={s.assignee ?? 'owner'} onChange={(e) => setStep(i, { assignee: e.target.value })} /></label></>}
+            <label>Assign to<input value={s.assignee ?? 'owner'} onChange={(e) => setStep(i, { assignee: e.target.value })} /></label>
+            <span className="muted" style={{ fontSize: '.8rem' }}>“owner” = the record’s owner (a lead from a form has none unless the form has an owner pool, and the step is then skipped). “none” = an unassigned task. Or a user id.</span></>}
           {s.kind === 'notify' && <>
             <label>Message<input value={s.message ?? ''} onChange={(e) => setStep(i, { message: e.target.value })} /></label>
             <label>To<input value={s.to ?? 'owner'} onChange={(e) => setStep(i, { to: e.target.value })} /></label></>}

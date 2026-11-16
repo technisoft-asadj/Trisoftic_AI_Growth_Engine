@@ -125,7 +125,7 @@ function EditorBody({ d, onBack }: { d: ItemDetail; onBack: () => void }) {
       {dirty && canWrite && <p className="muted">You have unsaved changes; save them before submitting.</p>}
       <Err e={error} />
       <p className="muted">Versions: {d.versions.map((v) => `v${v.number}${v.approved ? ' ✔ approved' : ''}${v.note ? ` — ${v.note}` : ''}`).join(' · ')}</p>
-      <p className="muted">Publishing to social networks arrives in Phase 3; scheduled items currently wait in the queue.</p>
+      <p className="muted">Scheduled items are published at their time to the product’s connected channel. See the Publishing page for status and anything that needs attention.</p>
     </>
   )
 }

@@ -19,6 +19,7 @@ x-app-env: &app-env
   Ai__Bedrock__Region: ${AWS_REGION:-}
   AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  Publishing__AllowSandbox: ${PUBLISHING_ALLOW_SANDBOX:-false}   # demo channel that "publishes" nowhere; leave false in production
   Governance__AllowSelfApproval: ${ALLOW_SELF_APPROVAL:-false}
 
 services:
