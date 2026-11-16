@@ -77,6 +77,10 @@ Items marked **DEFAULT** are chosen to fit the ~USD 100/month constraint and the
 | ADR-18 | Time | Store UTC (`timestamptz`) everywhere; display in user/booking time zone; IANA tz IDs | Appointments depend on it |
 | ADR-19 | Currency/money | `numeric(18,4)` + ISO currency code; never floats | Budget/opportunity values |
 | ADR-20 | "Missing ≠ zero" | `MetricObservation.Value` nullable + `Status` (`Reported`, `NotAvailable`, `Pending`); UI renders "—" with source/period/freshness | PRD §5.15 |
+| ADR-21 | **Client businesses ("agency-lite")** *(owner decision 16 Nov 2026)* | A **Client** is a grouping *inside the single TriSoftic organization*: it owns products and a brand kit. Client users are ordinary users with an approval-only role, scoped by the existing per-user product access, so a client sees and approves only its own products. **Not** separate tenants: no per-client database/org, billing or self-service signup. Full multi-tenancy stays the Phase 6 decision gate (ADR-17 keeps that door open) | Delivers "client approves their own content" at a fraction of the cost of tenancy; reuses ADR-07 product scoping |
+| ADR-22 | Visual production providers *(owner decision 16 Nov 2026)* | Two provider seams in BuildingBlocks, implemented by the AI module and a new Design module: `IImageGenerator` (**OpenAI Images API**; no text-to-image model is available on the current Bedrock account) and `IDesignProvider` (**Canva Connect**: fill a brand template, export). Every generated file is stored as an Asset with provenance (provider, model/template, prompt, cost) and, if AI-made, `IsSynthetic = true` | Providers stay swappable; PRD 5.6 (synthetic never presented as authentic UI/gameplay) is enforced by data, not by habit |
+| ADR-23 | **Tools deliberately not integrated** *(owner decision 16 Nov 2026)* | **CapCut** (no official public API; unofficial tools break and risk ToS: a person edits and uploads the finished video), **Metricool** (duplicates our own publishing/analytics; API needs a paid Advanced plan), **Meta Business Suite** (a screen for people, no API; we already use the Graph API directly). Revisit triggers: CapCut ships an official API; a second network is needed and a native adapter costs more than Metricool's plan | Avoids fragile or redundant integrations. These remain tools the team may use by hand |
+| ADR-24 | AI-generated visuals policy | AI images are *illustrations*: prompts forbid fake UI, fake gameplay, readable text and real people/brands; the product's brand kit (palette, style, banned imagery) is injected; the result is labelled "AI-generated" everywhere it is shown and carries the network's AI-disclosure where one exists. Each generation is budgeted and ledgered like a text call | Keeps visuals honest and inside the AI cost cap |
 
 ## 4. Solution layout
 
@@ -209,11 +213,44 @@ Order matters; each WP unblocks the next.
 
 **Exit:** owner compares proposed vs. actual spend and reviews evidence-based proposals. **→ MVP complete (acceptance list PRD §9 fully met).**
 
+### Phase 5A — Visual content production & client workflow *(inserted 16 Nov 2026 by owner decision; runs before 5.1–5.7)*
+
+Source: the owner's five-step "AI Content Production System" (client information → AI content planning → design **and** video production → human quality control → client approval & publishing → performance improvement). What already exists is marked ✅; the work packages cover only what is missing.
+
+| Step in the owner's workflow | Status today | Delivered by |
+|---|---|---|
+| 1 Client information (profile, audience, brand guidelines, goals) | ✅ product profile (facts, markets, voice). ❌ no visual brand kit, no client entity | 5A.4, 5A.8 |
+| 2 AI content planning (ideas, calendar, hooks, captions) | ✅ growth plans (angles, captions, schedule, review). ❌ plans cannot attach visuals | 5A.3 |
+| 3a Design production (templates + AI graphics) | ❌ files can only be uploaded by hand | 5A.2, 5A.5 |
+| 3b Video production | ❌ one uploaded video can be attached to a post, but Reels and video stories cannot be published and the video has no brief | 5A.1, 5A.6 |
+| 3c Human quality control (accuracy, branding, spelling, quality, platform requirements) | ❌ a single approval only | 5A.7 |
+| 4 Client approval & publishing | ✅ approval, scheduling, Facebook posting. ❌ client cannot approve their own products | 5A.8 |
+| 5 Performance improvement | ✅ plan review and next plan (needs real figures: Facebook permissions + app Live) | 5A.9 |
+
+**Sequence (each package is shippable on its own; the first needs nothing external):**
+
+| WP | Task | Depends on | Exit test |
+|---|---|---|---|
+| 5A.0 | **Spikes (1–2 days each, before any build):** (a) Canva: with the owner's real Canva plan, connect via OAuth, read one brand template's dataset, run one autofill job, export a PNG. *Canva's docs disagree on which plans may use autofill (Pro/Teams/Enterprise vs Enterprise only), so this is verified, not assumed.* (b) OpenAI Images: confirm the current model name, sizes and price, and that an image can be generated and stored. (c) Facebook Reels / video story: upload one real clip to the Page. (d) Meta app to **Live** mode (privacy-policy URL, icon, category) and confirm a post is publicly visible | — | Written findings per spike; plan edited if a spike fails |
+| 5A.1 | **Reels and video stories (Facebook):** formats `Reel` (one video) and video `Story`; start → upload (rupload host, streamed) → finish → status check; platform specs checked from the file before approval (aspect ratio, duration, size, format) using a media probe in the container; no idempotency key exists upstream, so after an uncertain failure the post is **checked, not retried blindly** | 3.1–3.3, media attach (done) | Fake network: timeout after accept never creates a second Reel; a clip outside the spec is refused at submit with the reason |
+| 5A.2 | **AI images:** `IImageGenerator` (ADR-22/24); prompt built from the product's approved profile and brand kit; result stored as a synthetic Asset with provenance and cost; per-product image count/cost cap in the existing AI ledger; "Generate image" in the post editor | 1.9, 1.7 | Image cost appears in AI usage and respects the cap; every generated asset is `IsSynthetic`; a prompt asking for a fake screenshot or readable text is refused or rewritten |
+| 5A.3 | **Plans attach visuals:** plan option *visuals* (none / my library / Canva / AI / mixed); the planner proposes a visual per slot (an exact existing asset name, a Canva template + fields, or an image prompt); drafting a slot produces the visual and attaches it to the version; the plan shows an **estimated cost before it runs** | 5A.2 (and 5A.5 for Canva) | A plan with visuals drafts N posts each carrying one image; an asset the planner invented is rejected; the estimate is within 10% of the ledger |
+| 5A.4 | **Brand kit** per product (and inherited by a client): logo asset, palette, fonts, visual style notes, banned imagery; approved like a profile version; injected into image prompts and used to pick Canva templates | 1.6 | AI image prompts contain the approved kit and nothing from an unapproved version |
+| 5A.5 | **Canva integration (`IDesignProvider`):** OAuth connect; list brand templates and their datasets; per-product template mapping (template ↔ post format ↔ field roles: headline, body, image, logo); autofill job → poll → export → Asset (provenance: design id, template, fields); "Open in Canva" for human touch-up and "Re-export"; tokens encrypted like Facebook tokens; rate/usage limits respected; Canva outage never blocks text-only posting | 5A.0(a), 5A.4 | Fake Canva: job timeout is retried safely, an export is stored once, a revoked connection is flagged "needs reconnect" |
+| 5A.6 | **Video brief** (the CapCut hand-off, ADR-23): AI writes a grounded brief (hook, script, shot list, on-screen text, caption, length, aspect ratio) as content format `VideoBrief` and a task for the editor; the editor uploads the finished video to Assets and links it to the brief; linking creates the Reel/Story post | 5A.1, 3.7 | Brief claims cite verified facts; a video uploaded against a brief appears on that brief and can be submitted |
+| 5A.7 | **Human QC stage before approval:** content status `InQc`; checklist (accuracy: claims all grounded — automatic; branding; spelling; platform requirements — automatic from 5A.1/media rules; quality) where automatic items are pre-ticked and the rest need a named reviewer; a failed item returns the post with a note; role `QC Reviewer` | 1.8, 5A.1 | A post cannot reach approval without a completed checklist; automatic items cannot be ticked by hand |
+| 5A.8 | **Clients (ADR-21):** `Client` (name, contact, logo/brand kit link); products belong to a client; client users get an approval-only role scoped to their products; **client approval** as the final stage when the product's client requires it; client-facing "Waiting for you" screen showing the post exactly as it will appear (text, images, video), approve / request changes with a comment; email notice with a signed link (consent-gated like all mail) | 1.2, 1.8, 3.10, 5A.7 | A client user can see and decide only their own products' posts (authorization matrix); self-approval rule still applies; a client's change request returns the post to draft with their comment |
+| 5A.9 | **Visual performance loop:** the plan review also compares visual choices (template, AI vs library, video vs photo) using only reported figures, and states when evidence is too thin; learnings feed the next plan | 4.3, 5A.3, plan review (done) | With figures missing the review says so; with figures present it never quotes a number it was not given |
+
+**Not in 5A (by decision):** automation of CapCut, Metricool and Meta Business Suite (ADR-23); Instagram and other networks (still Phase 5.7, only if justified by data); video generated by AI; separate tenants for clients (ADR-21).
+
+**Owner inputs needed by the time each package starts:** 5A.0/5A.5 a Canva account on a plan the spike confirms, and three to five **brand templates** built in Canva with named fields; 5A.2 an OpenAI API key (separate from a ChatGPT subscription); 5A.0(d) a privacy-policy URL; 5A.8 the first real client and their approver's email.
+
 ### Phase 5 — Intelligence & optimization (Days 91–130)
 Sequence: 5.1 Firebase/gameplay instrumentation in Ludo Fight (separate work in the game app; validate event quality first) → 5.2 Play Console/Firebase/BigQuery/AdMob importers (scheduled, provenance, freshness) → 5.3 sourced competitor/market research (source URL, date, confidence, fact/inference/hypothesis) → 5.4 experiments & variant comparison (hypothesis vs. result) → 5.5 attribution touchpoints and lead-to-revenue funnel (attributed / influenced / unknown) → 5.6 recommendations + learning loop → 5.7 additional social adapters only if justified by data. `pgvector` introduced here if research retrieval needs it.
 
 ### Phase 6 — Hardening & optional commercialization (Days 131+)
-Security review/pen-test, privacy review (retention/deletion/export), load test, backup + **timed restore test**, runbooks, monitoring/alerts polish, diagnostics UI, export tools. Then a *decision gate* on tenancy/billing; do not start tenancy work before internal validation.
+Security review/pen-test, privacy review (retention/deletion/export), load test, backup + **timed restore test**, runbooks, monitoring/alerts polish, diagnostics UI, export tools. Then a *decision gate* on tenancy/billing; do not start tenancy work before internal validation. (Phase 5A's "clients" are **not** tenancy: see ADR-21. The gate decides only whether clients ever need to be fully separate organizations with their own billing and sign-up.)
 
 ## 7. MVP scope guard
 
@@ -252,6 +289,11 @@ Mapping of PRD §9 acceptance criteria to work packages:
 | Audit | Every state-changing sensitive command has a test asserting an `AuditEvent` |
 | Recovery | Force each failure type; assert job visible, retryable, or manually resolvable |
 | Security | Dependency scan, secret scan in CI, OWASP ASVS-lite checklist per phase; webhook signature tests |
+| Synthetic visuals (5A) | Every AI-made image carries `IsSynthetic`; no code path shows it without the "AI-generated" label; image prompts are tested against "fake screenshot / fake gameplay / readable text / real person" requests |
+| Visual cost (5A) | A plan's cost estimate vs the ledger; an image or Canva call is refused once the product's AI cap is reached; no provider call happens in tests |
+| Client isolation (5A) | Authorization matrix extended with client users: a client sees, approves and downloads only its own products' content and files |
+| Quality control (5A) | No path from `Draft` to `Approved` skips the QC checklist; automatic checklist items cannot be set by a person |
+| Platform specs (5A) | Media outside a network's specs (aspect ratio, duration, size, count) is refused at submit and again at publish, with the reason |
 
 ## 9. Key domain state machines (define before coding)
 
@@ -300,6 +342,11 @@ Mapping of PRD §9 acceptance criteria to work packages:
 | D11 | Team size & who is Product Owner / Technical Lead | Needed to calibrate durations | Planning |
 | D12 | UI library | MUI | WP1.12 |
 | D13 | Ludo Fight market list for localization | Only verified markets; none assumed | WP1.11 |
+| D14 | **Who the visual system serves** — decided 16 Nov 2026 | Own products **and client businesses**, as "agency-lite" inside one organization (ADR-21); full multi-tenancy deferred to the Phase 6 gate | 5A.8 |
+| D15 | **Design route** — decided 16 Nov 2026 | Canva brand templates **plus** AI images via OpenAI (ADR-22). Fallback if the Canva spike fails: AI images + library only | 5A.2, 5A.5 |
+| D16 | **Video route** — decided 16 Nov 2026 | A person edits in CapCut and uploads the finished video; the platform writes the brief and publishes (ADR-23) | 5A.1, 5A.6 |
+| D17 | **Metricool / Meta Business Suite** — decided 16 Nov 2026 | Not integrated; native Facebook publishing and figures stay (ADR-23) | — |
+| D18 | Provider accounts for 5A | Canva plan confirmed by the 5A.0 spike; OpenAI API key; both stored as encrypted settings, never in source control | 5A.2, 5A.5 |
 
 ## 13. Risks and early-warning triggers
 
@@ -313,6 +360,12 @@ Mapping of PRD §9 acceptance criteria to work packages:
 | Consent shortcuts | Any send outside `ICanContact` | Architecture test fails the build |
 | Solo/low capacity | Slip >20% of phase | Cut within phase per §7, never cut kernels (K1–K5) or quality gates |
 | Game analytics untrustworthy | Event QA fails | Keep paid UA off; fix instrumentation first |
+| Canva plan or API access not as documented (docs disagree on Enterprise vs Pro/Teams) | The 5A.0(a) spike cannot run autofill on the owner's plan | Fall back to AI images + the asset library; revisit Canva when a suitable plan exists |
+| AI image model retired or renamed (the OpenAI image model lifecycle is reported inconsistently) | Spike 5A.0(b) cannot confirm the model | Keep the model name in configuration (ADR-11), never in code |
+| AI visuals misread as real product footage | Any asset shown without its "AI-generated" label, or a prompt that reproduces UI | Gate "Synthetic visuals"; stop generation for that product until fixed |
+| Posts invisible to the public (Meta app still in Development mode) | A post is visible only to app role-holders | 5A.0(d): switch the app Live before relying on public reach; until then treat Facebook output as private |
+| Client approval becomes a bottleneck | Posts wait >2 working days for a client | Reminder email via the consent-gated mailer; per-client auto-approval is **not** offered (it would defeat the approval) |
+| Scope growth from "clients" into full SaaS | Requests for client self-signup, billing, per-client databases | Change control; ADR-21 and the Phase 6 gate |
 
 ## 14. First 30 days — day-by-day
 

@@ -150,3 +150,10 @@ Secrets via env vars, e.g. `Ai__Anthropic__ApiKey`, `Ai__OpenAi__ApiKey` + `Ai__
 - Web: photo/video picker (thumbnails, selection order = posting order) in New content and in the editor; a Story format.
 - Tests: 155 unit, 18 architecture, 144 integration.
 - **Not built:** AI-generated images, video stories, reels, a plan that attaches images to its posts, Instagram.
+
+## Plan updated for visual content production (16 Nov 2026)
+
+Owner supplied a five-step "AI Content Production System" and a tool list (ChatGPT, Canva, CapCut, Metricool, Meta Business Suite). `IMPLEMENTATION_PLAN.md` now has **Phase 5A** (work packages 5A.0-5A.9), ADR-21 to ADR-24, decisions D14-D18, five new quality gates and six new risks. **Change control:** 5A is post-MVP and runs before the old 5.1-5.7, which move later.
+- Decided by the owner: serve own products **and client businesses** (built as "agency-lite" inside one organization, not as separate tenants); **Canva templates + OpenAI images**; **a person edits video in CapCut** and uploads it; **Metricool and Meta Business Suite are not integrated**.
+- Findings behind it: CapCut has no official public API; Metricool's API needs a paid Advanced plan; Meta Business Suite has no API; Canva's docs disagree on which plans may use autofill, so a spike with the owner's real plan comes first (5A.0); no text-to-image model is available on the current Bedrock account; the OpenAI image model lifecycle is reported inconsistently.
+- First build step is 5A.0 (spikes), then 5A.1 (Reels and video stories), which needs nothing external.
