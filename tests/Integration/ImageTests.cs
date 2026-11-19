@@ -72,7 +72,7 @@ public sealed class ImageTests(TestHost host)
         var admin = await host.LoginAdminAsync(); var pid = await ProductAsync(admin);
         var before = (await admin.GetFromJsonAsync<JsonElement>("/api/v1/ai/usage", Json)).GetProperty("monthToDateUsd").GetDecimal();
 
-        var res = await Make(admin, pid, "Friends laughing around a colourful board on a sunny balcony", "9:16");
+        var res = await Make(admin, pid, "A colourful board game on a sunny balcony", "9:16");
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         var body = await res.Content.ReadFromJsonAsync<JsonElement>(Json);
         Assert.Equal(0.04m, body.GetProperty("costUsd").GetDecimal());
@@ -83,7 +83,7 @@ public sealed class ImageTests(TestHost host)
         Assert.Equal("image/png", asset.GetProperty("contentType").GetString());
         Assert.Equal(1024, asset.GetProperty("width").GetInt32());
         Assert.Contains("AI-generated", asset.GetProperty("rightsNotes").GetString());
-        Assert.Contains("Friends laughing", asset.GetProperty("rightsNotes").GetString());   // the brief travels with the file
+        Assert.Contains("colourful board", asset.GetProperty("rightsNotes").GetString());   // the brief travels with the file
 
         var after = (await admin.GetFromJsonAsync<JsonElement>("/api/v1/ai/usage", Json)).GetProperty("monthToDateUsd").GetDecimal();
         Assert.Equal(0.04m, after - before);

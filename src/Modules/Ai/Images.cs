@@ -71,7 +71,7 @@ public static partial class ImagePrompt
     public static readonly string[] AspectRatios = ["1:1", "4:5", "5:4", "16:9", "9:16", "3:2", "2:3", "21:9", "9:21"];
     public const int MaxBriefLength = 500;
 
-    public const string Negative = "text, letters, words, captions, watermark, logo, brand mark, user interface, screenshot, app screen, HUD, buttons, score, "
+    public const string Negative = "photograph, photorealistic, photo, text, letters, words, captions, watermark, logo, brand mark, user interface, screenshot, app screen, HUD, buttons, score, "
         + "realistic human face, photograph of a real person, celebrity, low quality, blurry, distorted";
 
     private static readonly (Regex Pattern, string Why)[] Refusals =
@@ -81,6 +81,7 @@ public static partial class ImagePrompt
         (Words(), "an illustration cannot contain readable text. Put any words in the post text."),
         (Marks(), "an illustration cannot contain a logo, badge or someone else's brand. Upload your real logo as a file."),
         (People(), "an illustration cannot show a real person or a famous name."),
+        (Humans(), "AI pictures of people come out looking like real photographs of real-looking strangers, which is misleading in marketing. Describe objects, places or a cartoon character instead (for example a colourful board on a sunny balcony)."),
     ];
 
     /// <returns>A plain-language reason when the brief asks for something an AI picture must not be, otherwise null.</returns>
@@ -94,7 +95,7 @@ public static partial class ImagePrompt
     {
         var sb = new StringBuilder();
         sb.Append(brief.Trim().TrimEnd('.')).Append(". ");
-        sb.Append($"A digital illustration for a marketing post about \"{k.ProductName}\" ({Short(k.Summary, 200)}). ");
+        sb.Append($"A flat stylised cartoon-style digital illustration (clearly not a photograph, painted look, simplified shapes) for a marketing post about \"{k.ProductName}\" ({Short(k.Summary, 200)}). ");
         if (!string.IsNullOrWhiteSpace(k.Tone)) sb.Append($"Mood: {Short(k.Tone!, 80)}. ");
         sb.Append("Clean composition, bright colours, no text, no letters, no logos, no interface elements, no real people.");
         return sb.ToString();
@@ -110,6 +111,8 @@ public static partial class ImagePrompt
     private static partial Regex Words();
     [GeneratedRegex(@"\b(logos?|badges?|trademarks?|app store|google play|play store|facebook|instagram|tiktok|whatsapp|youtube|brand ?marks?)\b", RegexOptions.IgnoreCase)]
     private static partial Regex Marks();
+    [GeneratedRegex(@"\b(friends?|family|families|people|persons?|man|men|woman|women|girls?|boys?|kids?|child|children|crowd|couple|group of|players?|faces?|smil\w+|laugh\w+)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex Humans();
     [GeneratedRegex(@"\b(celebrit\w+|famous|real person|politician|president|actor|actress|footballer|cricketer|influencer|portrait of)\b", RegexOptions.IgnoreCase)]
     private static partial Regex People();
 }

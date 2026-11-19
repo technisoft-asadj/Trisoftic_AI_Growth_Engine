@@ -6,8 +6,8 @@ namespace TriSoftic.GrowthEngine.Tests.Unit;
 public sealed class ImagePromptTests
 {
     [Theory]
-    [InlineData("Friends laughing around a colourful board on a sunny balcony")]
-    [InlineData("A family playing dice at a kitchen table, warm evening light")]
+    [InlineData("A colourful board game on a sunny balcony, warm light")]
+    [InlineData("Dice and wooden tokens on a kitchen table, warm evening light")]
     [InlineData("An apple tree and a red kite over green hills")]
     [InlineData("A cheerful cartoon rocket flying over a city skyline")]
     public void Ordinary_scene_descriptions_are_allowed(string brief) => Assert.Null(ImagePrompt.Refusal(brief));
@@ -20,6 +20,8 @@ public sealed class ImagePromptTests
     [InlineData("our logo in gold", "logo")]
     [InlineData("a Facebook like button", "brand")]
     [InlineData("a celebrity holding a trophy", "person")]
+    [InlineData("Friends laughing around a board on a balcony", "photographs")]
+    [InlineData("A family playing dice", "photographs")]
     public void A_brief_for_something_an_illustration_must_not_be_is_refused_with_a_reason(string brief, string reasonContains)
     {
         var reason = ImagePrompt.Refusal(brief);
@@ -39,5 +41,7 @@ public sealed class ImagePromptTests
         Assert.Contains("Mood: playful", p);
         Assert.Contains("no text, no letters, no logos", p);
         Assert.Contains("user interface", ImagePrompt.Negative);
+        Assert.Contains("not a photograph", p);
+        Assert.Contains("photorealistic", ImagePrompt.Negative);
     }
 }
