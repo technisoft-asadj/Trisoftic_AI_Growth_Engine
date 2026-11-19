@@ -14,6 +14,24 @@ public sealed class ProviderOptions
     public bool BedrockEnabled => !string.IsNullOrWhiteSpace(Region) && Models.Count > 0;
 }
 
+/// <summary>AI pictures. They use the same AWS credentials as Bedrock text, and count against the same monthly budgets as every other AI call.</summary>
+public sealed class ImageOptions
+{
+    /// <summary>Stability models are served from us-west-2 (us-east-1 only has editing tools).</summary>
+    public string Region { get; set; } = "us-west-2";
+    public string Model { get; set; } = "stability.stable-image-core-v1:1";
+    /// <summary>USD per picture, AWS list prices. An estimate: check the AWS bill and override here.</summary>
+    public Dictionary<string, decimal> PricePerImageUsd { get; set; } = new()
+    {
+        ["stability.stable-image-core-v1:1"] = 0.04m,
+        ["stability.sd3-5-large-v1:0"] = 0.08m,
+        ["stability.stable-image-ultra-v1:1"] = 0.14m,
+    };
+    /// <summary>A hard stop on how many pictures one product may make in a calendar month, whatever they cost.</summary>
+    public int MaxPerProductPerMonth { get; set; } = 40;
+    public decimal PriceFor(string model) => PricePerImageUsd.GetValueOrDefault(model);
+}
+
 /// <summary>Bound from the "Ai" configuration section. Keys come from the environment / secret store, never source control.</summary>
 public sealed class AiOptions
 {
@@ -27,6 +45,7 @@ public sealed class AiOptions
         Models = new() { ["Draft"] = "claude-sonnet-5-5", ["Strategy"] = "claude-opus-5-5" },
     };
     public ProviderOptions OpenAi { get; set; } = new() { BaseUrl = "https://api.openai.com" };
+    public ImageOptions Images { get; set; } = new();
 
     /// <summary>Claude on Amazon Bedrock. Enabled by setting Ai:Bedrock:Region (e.g. us-east-1) and, if needed, overriding model ids.</summary>
     public ProviderOptions Bedrock { get; set; } = new()

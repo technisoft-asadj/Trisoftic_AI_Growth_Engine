@@ -22,6 +22,8 @@ public static class AiModule
         s.AddSingleton<IAiProvider, AnthropicBedrockProvider>();
         s.AddScoped<IAiProvider, OpenAiProvider>();
         s.AddScoped<IAiGenerator, AiGenerator>();
+        s.AddSingleton<IImageProvider, BedrockStabilityProvider>();
+        s.AddScoped<ImageGenerator>();
         s.AddScoped<GroundedGenerator>();
         s.AddScoped<IAiDraftLookup, AiDraftLookup>();
         s.AddScoped<IContentDrafter, ContentDrafter>();
@@ -29,6 +31,7 @@ public static class AiModule
     }
 
     public sealed record GenerateBody(GroundedKind Kind, string Brief, string? Channel, string? Language, string? Audience);
+    public sealed record ImageBody(string? Brief, string? AspectRatio);
     public sealed record UsageSummary(decimal MonthToDateUsd, decimal GlobalBudgetUsd, decimal PerProductBudgetUsd, bool GlobalAlert, IReadOnlyList<ProductUsage> Products);
     public sealed record ProductUsage(Guid? ProductId, decimal CostUsd, int Calls, bool Alert, bool Exhausted);
 
@@ -83,6 +86,28 @@ public static class AiModule
                 await audit.WriteAsync(new AuditEntry("ai.generated", "AiDraft", saved.Id.ToString(), id, $"{o.TemplateKey} v{o.TemplateVersion}",
                     After: new { o.Provider, o.Model, o.CostUsd, o.ProfileVersion, o.Attempts }), ct);
                 return Results.Ok(new { draftId = saved.Id, o.Draft, o.ProfileVersion, o.Provider, o.Model, o.CostUsd, o.Attempts, o.TemplateKey, o.TemplateVersion });
+            }
+            catch (AiException ex)
+            {
+                var status = ex.Outcome switch { AiOutcome.BudgetBlocked => 402, AiOutcome.Paused => 503, AiOutcome.Refused => 422, _ => 502 };
+                return Results.Problem(statusCode: status, title: ex.Message, extensions: new Dictionary<string, object?> { ["outcome"] = ex.Outcome.ToString() });
+            }
+        });
+
+        g.MapPost("/products/{id:guid}/ai/images", async (Guid id, ImageBody body, ImageGenerator gen, ICurrentUser u, IAuditWriter audit, CancellationToken ct) =>
+        {
+            if (!u.HasPermission(Permissions.AiGenerate) || !await u.CanAccessProductAsync(id, ct)) return Results.NotFound();   // content creators may generate; the file is filed by the system, labelled AI-generated
+            try
+            {
+                var res = await gen.GenerateAsync(new ImageRequest(id, body.Brief ?? "", body.AspectRatio ?? "1:1"), ct);
+                if (!res.IsSuccess)
+                {
+                    var e = res.Error!;
+                    return Results.Problem(statusCode: e.Kind switch { ErrorKind.Conflict => 409, ErrorKind.Policy => 422, _ => 400 }, title: e.Message, extensions: new Dictionary<string, object?> { ["code"] = e.Code });
+                }
+                var o = res.Value!;
+                await audit.WriteAsync(new AuditEntry("ai.image-generated", "Asset", o.AssetId.ToString(), id, o.Model, After: new { o.Model, o.AspectRatio, o.CostUsd }), ct);
+                return Results.Ok(new { assetId = o.AssetId, o.Model, o.AspectRatio, costUsd = o.CostUsd });
             }
             catch (AiException ex)
             {

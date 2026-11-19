@@ -15,6 +15,16 @@ public interface IAssetCatalog
     Task<Stream?> OpenAsync(Guid id, CancellationToken ct = default);
 }
 
+/// <summary>An AI-made picture to be filed in a product's library. The assets module marks it synthetic and records where it came from.</summary>
+public sealed record NewGeneratedAsset(Guid ProductId, string Name, string ContentType, byte[] Bytes, string Provenance);
+
+/// <summary>Implemented by the assets module so the AI module can file a generated picture without depending on it.</summary>
+public interface IGeneratedAssetStore
+{
+    /// <returns>The new asset's id, or an error message when the bytes are not an acceptable picture.</returns>
+    Task<(Guid? AssetId, string? Error)> SaveAsync(NewGeneratedAsset asset, CancellationToken ct = default);
+}
+
 /// <summary>
 /// The rules for which files a post may carry. Shared by content (when attaching) and publishing (when sending), so the two can never disagree.
 ///   Post:  no media, 1-10 images, or exactly 1 video (any shape).

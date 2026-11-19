@@ -57,6 +57,8 @@ public sealed class TestHost : WebApplicationFactory<Program>, IAsyncLifetime
             s.AddScoped<TriSoftic.GrowthEngine.Modules.Automation.IWebhookClient, FakeWebhookClient>();
             s.RemoveAll<IAiProvider>();
             s.AddSingleton<IAiProvider, FakeAiProvider>();
+            s.RemoveAll<IImageProvider>();
+            s.AddSingleton<IImageProvider, FakeImageProvider>();
         });
     }
 

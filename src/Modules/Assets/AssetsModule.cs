@@ -18,6 +18,7 @@ public static class AssetsModule
         s.AddModuleDbContext<AssetsDbContext>(c, AssetsDbContext.Schema);
         s.AddSingleton<IObjectStorage, FileSystemObjectStorage>();
         s.AddScoped<IAssetCatalog, AssetCatalog>();
+        s.AddScoped<IGeneratedAssetStore, GeneratedAssetStore>();
         return s;
     }
 
@@ -156,6 +157,40 @@ public static class AssetsModule
         try { await db.SaveChangesAsync(ct); }
         catch { await storage.DeleteAsync(key, CancellationToken.None); throw; }   // don't orphan the object if the row fails
         return (asset, null);
+    }
+}
+
+/// <summary>Files an AI-made picture in the library. It is always synthetic, always labelled as AI-generated, and never has its rights left unknown.</summary>
+public sealed class GeneratedAssetStore(AssetsDbContext db, IObjectStorage storage, IClock clock, ICurrentUser user, IAuditWriter audit) : IGeneratedAssetStore
+{
+    public async Task<(Guid? AssetId, string? Error)> SaveAsync(NewGeneratedAsset g, CancellationToken ct = default)
+    {
+        if (FileValidation.Check(g.Name, g.Bytes.Length, g.Bytes.AsSpan(0, Math.Min(16, g.Bytes.Length)).ToArray(), out var rule) is { } err) return (null, err);
+        var key = $"assets/{g.ProductId:N}/{Guid.NewGuid():N}";
+        await using (var ms = new MemoryStream(g.Bytes, writable: false)) await storage.PutAsync(key, ms, rule!.ContentType, ct);
+
+        var groupId = Guid.CreateVersion7();
+        var asset = new Asset
+        {
+            ProductId = g.ProductId, GroupId = groupId, Version = 1, Name = FileValidation.SafeName(g.Name), Kind = AssetKind.Image, ContentType = rule.ContentType,
+            SizeBytes = g.Bytes.Length, Sha256 = Convert.ToHexString(SHA256.HashData(g.Bytes)).ToLowerInvariant(), StorageKey = key,
+            Source = AssetSource.AiGenerated, OwnerName = "AI-generated", Rights = UsageRights.Unrestricted, RightsNotes = g.Provenance,
+            IsSynthetic = true, UploadedBy = user.UserId, CreatedAt = clock.UtcNow,
+        };
+        if (PngSize(g.Bytes) is { } size) { asset.Width = size.W; asset.Height = size.H; }
+        db.Assets.Add(asset);
+        try { await db.SaveChangesAsync(ct); }
+        catch { await storage.DeleteAsync(key, CancellationToken.None); throw; }
+        await audit.WriteAsync(new AuditEntry("asset.generated", "Asset", groupId.ToString(), g.ProductId, asset.Name, After: new { asset.Source, asset.Sha256, asset.RightsNotes }), ct);
+        return (asset.Id, null);
+    }
+
+    /// <summary>The picture size is in the PNG header (bytes 16 to 23). Unknown for any other format, never guessed.</summary>
+    internal static (int W, int H)? PngSize(byte[] b)
+    {
+        if (b.Length < 24 || b[0] != 0x89 || b[1] != 0x50 || b[2] != 0x4E || b[3] != 0x47) return null;
+        var w = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(b.AsSpan(16, 4)); var h = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(b.AsSpan(20, 4));
+        return w > 0 && h > 0 ? (w, h) : null;
     }
 }
 

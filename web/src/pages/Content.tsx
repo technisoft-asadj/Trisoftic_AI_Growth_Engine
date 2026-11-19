@@ -229,13 +229,44 @@ const formatHint: Record<string, string> = {
   Reel: 'A reel needs exactly one vertical (9:16) MP4 video of 3 to 90 seconds, at least 540x960. Export it from your video editor at 1080x1920.',
 }
 
+const imageShapes: [string, string][] = [['1:1', 'Square'], ['4:5', 'Portrait'], ['9:16', 'Story (tall)'], ['16:9', 'Wide']]
+
+/** Describe a picture and let the AI make it. It is filed in Assets, labelled AI-generated, and attached here. Never a screenshot, gameplay, text or a logo. */
+function AiPicture({ productId, format, value, onChange }: { productId: string; format?: string; value: string[]; onChange: (v: string[]) => void }) {
+  const qc = useQueryClient()
+  const [brief, setBrief] = useState('')
+  const [shape, setShape] = useState(format === 'Story' ? '9:16' : '1:1')
+  const make = useMutation({
+    mutationFn: () => api.post<{ assetId: string; costUsd: number }>(`/api/v1/products/${productId}/ai/images`, { brief, aspectRatio: shape }),
+    onSuccess: (r) => { setBrief(''); void qc.invalidateQueries({ queryKey: ['assets', productId] }); void qc.invalidateQueries({ queryKey: ['ai-usage'] }); onChange(format === 'Story' ? [r.assetId] : [...value, r.assetId]) },
+  })
+  return (
+    <details>
+      <summary>Make a picture with AI</summary>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
+        <label style={{ flex: '1 1 320px' }}>Describe the scene
+          <input value={brief} maxLength={500} onChange={(e) => setBrief(e.target.value)} placeholder="Friends laughing around a colourful board on a sunny balcony" />
+        </label>
+        <label>Shape
+          <select value={shape} onChange={(e) => setShape(e.target.value)}>{imageShapes.map(([v, l]) => <option key={v} value={v}>{l} ({v})</option>)}</select>
+        </label>
+        <button type="button" disabled={make.isPending || brief.trim().length < 3} onClick={() => make.mutate()}>{make.isPending ? 'Making it…' : 'Make picture'}</button>
+      </div>
+      <p className="muted">The picture is an illustration and is labelled AI-generated. It cannot show screenshots, gameplay, readable text, logos or real people. Each one costs about $0.04 and counts toward the monthly AI budget.</p>
+      <Err e={make.error} />
+    </details>
+  )
+}
+
 function MediaPicker({ productId, format, value, onChange, disabled }: { productId: string; format?: string; value: string[]; onChange: (v: string[]) => void; disabled?: boolean }) {
+  const { can } = useAuth()
   const assets = useQuery({ queryKey: ['assets', productId], queryFn: () => api.get<AssetItem[]>(`/api/v1/products/${productId}/assets`) })
   const usable = (assets.data ?? []).filter((a) => a.contentType.startsWith('image/') || a.contentType.startsWith('video/'))
   const toggle = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id])
   return (
     <fieldset className="card">
       <legend>Photos or video <span className="muted">(optional)</span></legend>
+      {!disabled && can('ai.generate') && (format === 'Post' || format === 'Story' || format === undefined) && <AiPicture productId={productId} format={format} value={value} onChange={onChange} />}
       {assets.isLoading && <p className="muted">Loading files…</p>}
       {assets.data && usable.length === 0 && <p className="muted">No images or videos yet. Upload some in the Assets tab, with the right usage rights, then attach them here.</p>}
       <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -246,7 +277,7 @@ function MediaPicker({ productId, format, value, onChange, disabled }: { product
               {a.contentType.startsWith('image/')
                 ? <img src={`/api/v1/assets/${a.id}/content`} alt={a.name} style={{ width: 140, height: 100, objectFit: 'cover', borderRadius: 6, outline: n >= 0 ? '3px solid var(--accent, #6366f1)' : 'none' }} />
                 : <div style={{ width: 140, height: 100, display: 'grid', placeItems: 'center', background: 'rgba(128,128,128,.2)', borderRadius: 6, outline: n >= 0 ? '3px solid var(--accent, #6366f1)' : 'none', textAlign: 'center' }}>▶ video<br /><span className="muted">{a.durationSeconds != null && a.width != null && a.height != null ? `${Math.round(a.durationSeconds)} s · ${a.width}×${a.height}` : 'size unknown'}</span></div>}
-              <div><input type="checkbox" checked={n >= 0} disabled={disabled} onChange={() => toggle(a.id)} /> {n >= 0 && <b>{n + 1}. </b>}<span className="muted">{a.name}</span></div>
+              <div><input type="checkbox" checked={n >= 0} disabled={disabled} onChange={() => toggle(a.id)} /> {n >= 0 && <b>{n + 1}. </b>}{a.isSynthetic && <span className="badge">AI</span>} <span className="muted">{a.name}</span></div>
             </label>
           )
         })}
