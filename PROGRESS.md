@@ -176,3 +176,9 @@ Owner supplied a five-step "AI Content Production System" and a tool list (ChatG
 - **Live check:** two real pictures were made for Ludo Fight (about $0.08); both were filed correctly. `style_preset` is not accepted by the Core model on Bedrock.
 - Web: "Make a picture with AI" in the media picker for Posts and Stories; AI files carry an "AI" tag.
 - Tests: 177 unit, 18 architecture, integration suite passing (images: filing, cost, refusals, monthly cap, permissions, attach to a post).
+
+## Plan update: Phase 5B, Facebook reach and followers (20 Nov 2026)
+
+- A research agent produced a report of 14 growth ideas from the plan, the progress notes and Meta's current published rules. The owner reviewed it and answered the six open questions; the result is **Phase 5B (5B.0 to 5B.11)** in `IMPLEMENTATION_PLAN.md`, plus **ADR-25** (growth ethics: nothing Meta prohibits, no automatic comments, no like-gating).
+- Owner answers: weekly original vertical video will be produced; USD 20-50 paid boost wanted within six months (research spike first); calendar may use any market or festival with a source and named reviewer; comment replies drafted by the platform and approved by a person (`pages_manage_engagement` request being prepared); Page is linked to Instagram and Instagram is wanted; installs cannot be attributed, so success is link clicks only.
+- Build order: 5B.0 spike, 5B.1 Page-level figures, 5B.2 tags and leaderboard, 5B.3 hook tests, 5B.5 weekly auto-review; 5B.6 comments inbox starts early because Meta's review takes weeks.
