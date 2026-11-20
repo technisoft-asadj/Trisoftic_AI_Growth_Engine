@@ -17,6 +17,7 @@ public static class GovernanceModule
         s.AddScoped<IAuditWriter, AuditWriter>();
         s.AddScoped<IPauseSwitch, PauseSwitch>();
         s.AddScoped<IApprovalService, ApprovalService>();
+        s.AddScoped<IAgentApprovals, AgentApprovals>();
         return s;
     }
 }

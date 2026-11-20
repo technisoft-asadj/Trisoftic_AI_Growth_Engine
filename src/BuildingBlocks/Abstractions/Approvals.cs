@@ -48,3 +48,22 @@ public interface IApprovalSubjectHandler
     string RequiredPermission { get; }
     Task<Result> OnDecidedAsync(ApprovalDecisionContext context, CancellationToken ct);
 }
+
+/// <summary>The fixed identity the AI reviewer decides under, so every automatic decision is recognisable in the approval history and the audit trail.</summary>
+public static class AgentIdentity
+{
+    public static readonly Guid ReviewerId = new("a1a1a1a1-0000-7000-8000-000000000001");
+    public const string ReviewerName = "AI reviewer";
+}
+
+public sealed record PendingApprovalInfo(Guid ApprovalId, string SubjectId, int SubjectVersion, Guid? ProductId, string Title);
+
+/// <summary>
+/// Lets the AI reviewer decide pending approvals. It runs through the same subject handler as a person's decision (so a stale version is refused),
+/// is recorded under <see cref="AgentIdentity.ReviewerId"/>, and is audited. Implemented by the Governance module.
+/// </summary>
+public interface IAgentApprovals
+{
+    Task<IReadOnlyList<PendingApprovalInfo>> ListPendingAsync(string subjectType, IReadOnlyCollection<string> subjectIds, CancellationToken ct = default);
+    Task<Result> DecideAsync(Guid approvalId, ApprovalDecision decision, string comment, CancellationToken ct = default);
+}

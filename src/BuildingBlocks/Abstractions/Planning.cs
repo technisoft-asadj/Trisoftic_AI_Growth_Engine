@@ -51,4 +51,8 @@ public sealed record PublishedPostTags(Guid ItemId, string Channel, string Forma
 public interface IContentCatalog
 {
     Task<IReadOnlyList<PublishedPostTags>> GetPublishedAsync(Guid productId, string? channel, CancellationToken ct = default);
+    /// <summary>How many posts for the product and channel are scheduled, being published or published on the given UTC day.</summary>
+    Task<int> CountOnDayAsync(Guid productId, string channel, DateOnly day, CancellationToken ct = default);
+    /// <summary>The text of the product's posts that are scheduled or went out since the given time, for the duplicate check.</summary>
+    Task<IReadOnlyList<string>> GetRecentBodiesAsync(Guid productId, string channel, DateTimeOffset since, CancellationToken ct = default);
 }

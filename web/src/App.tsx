@@ -1,3 +1,4 @@
+import { AutopilotPage } from './pages/Autopilot.tsx'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { ManageBookingPage, PublicBookingPage } from './pages/Booking.tsx'
 import { UnsubscribePage } from './pages/Messaging.tsx'
@@ -37,6 +38,7 @@ export default function App() {
           {can('crm.read') && <NavLink to="/crm">CRM</NavLink>}
           <NavLink to="/inbox">Inbox{!!summary.data?.unreadNotifications && <span className="badge warn"> {summary.data.unreadNotifications}</span>}{!!summary.data?.overdueTasks && <span className="badge warn"> {summary.data.overdueTasks} overdue</span>}</NavLink>
           {can('publishing.manage') && <NavLink to="/publishing">Publishing</NavLink>}
+          {can('publishing.manage') && can('campaigns.manage') && <NavLink to="/autopilot">Autopilot</NavLink>}
           {can('analytics.read') && <NavLink to="/analytics">Analytics</NavLink>}
           {can('budget.read') && <NavLink to="/budget">Budget</NavLink>}
           {can('automation.manage') && <NavLink to="/automation">Automation</NavLink>}
@@ -56,6 +58,7 @@ export default function App() {
           <Route path="/crm/*" element={<CrmPage />} />
           <Route path="/inbox" element={<InboxPage />} />
           <Route path="/publishing" element={<PublishingPage />} />
+          <Route path="/autopilot" element={<AutopilotPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/budget" element={<BudgetPage />} />
           <Route path="/account" element={<AccountPage />} />

@@ -33,6 +33,8 @@ public sealed class GrowthPlan : IOrganizationScoped
     /// <summary>Set when this plan was built from the learnings of an earlier plan's review.</summary>
     public Guid? PreviousPlanId { get; set; }
     public Guid? PreviousReviewId { get; set; }
+    /// <summary>True when the autopilot created this plan and runs it (drafts, reviews, schedules). Plans made by a person are never touched by it.</summary>
+    public bool Managed { get; set; }
     public string Provider { get; set; } = "";
     public string Model { get; set; } = "";
     public decimal CostUsd { get; set; }
@@ -52,6 +54,10 @@ public sealed class PlanSlot : IOrganizationScoped
     public string Brief { get; set; } = "";
     /// <summary>How this post should open (see HookTypes). Carried onto the content item when the post is drafted.</summary>
     public string? HookType { get; set; }
+    /// <summary>How many times the autopilot has drafted this slot. A rejected draft is rewritten; after the limit the slot is left for a person.</summary>
+    public int Attempts { get; set; }
+    /// <summary>What the reviewer objected to last time, passed to the next draft.</summary>
+    public string? Guidance { get; set; }
     public SlotStatus Status { get; set; }
     public Guid? ContentItemId { get; set; }
     public DateTimeOffset? DraftedAt { get; set; }
@@ -76,12 +82,57 @@ public sealed class PlanReview : IOrganizationScoped
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+/// <summary>Per product: whether the autopilot runs, and the standing brief it plans from. Off by default.</summary>
+public sealed class AutopilotSettings : IOrganizationScoped
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid OrganizationId { get; set; }
+    public Guid ProductId { get; set; }
+    public bool Enabled { get; set; }
+    public string Channel { get; set; } = "Facebook";
+    public string? Language { get; set; }
+    public string Goal { get; set; } = "";
+    public int PlanDays { get; set; } = 7;
+    public int EveryDays { get; set; } = 1;
+    public TimeOnly PostTimeUtc { get; set; } = new(13, 0);
+    /// <summary>Hard ceiling on posts per product, channel and UTC day, whatever the plan says.</summary>
+    public int MaxPostsPerDay { get; set; } = 2;
+    /// <summary>How far ahead posts are written and approved.</summary>
+    public int LookaheadHours { get; set; } = 72;
+    public Guid? UpdatedBy { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset? LastRunAt { get; set; }
+    public string? LastRunNote { get; set; }
+}
+
+/// <summary>One decision of the AI reviewer, with every check it ran. Kept so a person can see exactly why a post went out or was held back.</summary>
+public sealed class AutopilotDecision : IOrganizationScoped
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid OrganizationId { get; set; }
+    public Guid ProductId { get; set; }
+    public Guid? PlanId { get; set; }
+    public Guid? SlotId { get; set; }
+    public Guid? ContentItemId { get; set; }
+    public int Version { get; set; }
+    /// <summary>Approved, Rejected, Escalated (left for a person) or Deferred (could not be reviewed yet).</summary>
+    public string Verdict { get; set; } = "";
+    public int Attempt { get; set; }
+    public string Reasons { get; set; } = "";
+    public string ChecksJson { get; set; } = "[]";
+    public string Model { get; set; } = "";
+    public decimal CostUsd { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> options) : DbContext(options)
 {
     public const string Schema = "planning";
     public DbSet<GrowthPlan> Plans => Set<GrowthPlan>();
     public DbSet<PlanSlot> Slots => Set<PlanSlot>();
     public DbSet<PlanReview> Reviews => Set<PlanReview>();
+    public DbSet<AutopilotSettings> Autopilot => Set<AutopilotSettings>();
+    public DbSet<AutopilotDecision> Decisions => Set<AutopilotDecision>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -93,7 +144,7 @@ public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> option
             e.Property(x => x.Goal).HasMaxLength(2000);
             e.Property(x => x.Channel).HasMaxLength(60); e.Property(x => x.Language).HasMaxLength(40);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
-            e.Property(x => x.Rationale).HasMaxLength(8000);
+            e.Property(x => x.Rationale).HasMaxLength(8000); e.Property(x => x.Managed).HasDefaultValue(false);
             e.Property(x => x.MeasuresJson).HasColumnType("jsonb");
             e.Property(x => x.CostUsd).HasPrecision(12, 6);
             e.HasIndex(x => new { x.ProductId, x.CreatedAt });
@@ -101,10 +152,24 @@ public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> option
         b.Entity<PlanSlot>(e =>
         {
             e.ToTable("plan_slots"); e.HasKey(x => x.Id);
-            e.Property(x => x.Angle).HasMaxLength(300); e.Property(x => x.Brief).HasMaxLength(2000); e.Property(x => x.HookType).HasMaxLength(40);
+            e.Property(x => x.Angle).HasMaxLength(300); e.Property(x => x.Brief).HasMaxLength(2000); e.Property(x => x.HookType).HasMaxLength(40); e.Property(x => x.Guidance).HasMaxLength(2000);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             e.HasIndex(x => new { x.PlanId, x.Position }).IsUnique();
             e.HasOne<GrowthPlan>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<AutopilotSettings>(e =>
+        {
+            e.ToTable("autopilot_settings"); e.HasKey(x => x.Id);
+            e.Property(x => x.Channel).HasMaxLength(60); e.Property(x => x.Language).HasMaxLength(40); e.Property(x => x.Goal).HasMaxLength(2000); e.Property(x => x.LastRunNote).HasMaxLength(1000);
+            e.HasIndex(x => x.ProductId).IsUnique();
+        });
+        b.Entity<AutopilotDecision>(e =>
+        {
+            e.ToTable("autopilot_decisions"); e.HasKey(x => x.Id);
+            e.Property(x => x.Verdict).HasMaxLength(20); e.Property(x => x.Reasons).HasMaxLength(4000); e.Property(x => x.Model).HasMaxLength(100);
+            e.Property(x => x.ChecksJson).HasColumnType("jsonb"); e.Property(x => x.CostUsd).HasPrecision(12, 6);
+            e.HasIndex(x => new { x.ProductId, x.CreatedAt });
+            e.HasIndex(x => x.ContentItemId);
         });
         b.Entity<PlanReview>(e =>
         {
