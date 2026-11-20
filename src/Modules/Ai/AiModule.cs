@@ -24,6 +24,7 @@ public static class AiModule
         s.AddScoped<IAiGenerator, AiGenerator>();
         s.AddSingleton<IImageProvider, BedrockStabilityProvider>();
         s.AddScoped<ImageGenerator>();
+        s.AddScoped<ICommentTriage, CommentTriage>();
         s.AddScoped<GroundedGenerator>();
         s.AddScoped<IAiDraftLookup, AiDraftLookup>();
         s.AddScoped<IContentDrafter, ContentDrafter>();

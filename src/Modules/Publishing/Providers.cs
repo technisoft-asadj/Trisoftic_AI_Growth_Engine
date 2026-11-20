@@ -63,7 +63,19 @@ public interface IChannelPublisher
     /// answered or why none did. Returns null when this adapter cannot report on the Page at all.
     /// </summary>
     Task<IReadOnlyList<PageFigureResult>?> GetPageFiguresAsync(PostRequest account, DateOnly from, DateOnly to, CancellationToken ct) => Task.FromResult<IReadOnlyList<PageFigureResult>?>(null);
+
+    /// <summary>The newest top-level comments on one published post. Null when this adapter cannot read comments.</summary>
+    Task<IReadOnlyList<ProviderComment>?> GetCommentsAsync(PostRequest account, string providerPostId, CancellationToken ct) => Task.FromResult<IReadOnlyList<ProviderComment>?>(null);
+
+    /// <summary>Posts one reply under a comment and returns the reply's id. Null when this adapter cannot reply. Only ever called after a person approved the text.</summary>
+    Task<string?> ReplyToCommentAsync(PostRequest account, string commentId, string text, CancellationToken ct) => Task.FromResult<string?>(null);
+
+    /// <summary>Hides or unhides a comment (it stays visible to its author and their friends). False when this adapter cannot. Only ever called after a person confirmed.</summary>
+    Task<bool> SetCommentHiddenAsync(PostRequest account, string commentId, bool hidden, CancellationToken ct) => Task.FromResult(false);
 }
+
+/// <summary>One public comment as the network reports it. <see cref="AuthorId"/> lets the Page's own comments be skipped.</summary>
+public sealed record ProviderComment(string Id, string? AuthorId, string? AuthorName, string Text, DateTimeOffset CreatedAt, bool IsHidden);
 
 public sealed record PageFigureValue(DateOnly Day, long Value);
 
@@ -123,7 +135,7 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
 
     // ---- OAuth ----
     public string AuthorizeUrl(string state)
-        => $"https://www.facebook.com/{Version}/dialog/oauth?client_id={Uri.EscapeDataString(AppId)}&redirect_uri={Uri.EscapeDataString(RedirectUri)}&state={Uri.EscapeDataString(state)}&scope=pages_show_list,pages_manage_posts,pages_read_engagement,pages_read_user_content,read_insights";
+        => $"https://www.facebook.com/{Version}/dialog/oauth?client_id={Uri.EscapeDataString(AppId)}&redirect_uri={Uri.EscapeDataString(RedirectUri)}&state={Uri.EscapeDataString(state)}&scope=pages_show_list,pages_manage_posts,pages_read_engagement,pages_read_user_content,pages_manage_engagement,read_insights";
 
     public async Task<string> ExchangeCodeAsync(string code, CancellationToken ct)
     {
@@ -392,6 +404,38 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
             results.Add(found ?? new PageFigureResult(figure, null, reason ?? "no metric configured", []));
         }
         return results;
+    }
+
+    // Comments need pages_read_user_content (reading) and pages_manage_engagement (replying, hiding).
+    public async Task<IReadOnlyList<ProviderComment>?> GetCommentsAsync(PostRequest account, string providerPostId, CancellationToken ct)
+    {
+        var fields = Uri.EscapeDataString("id,message,from{id,name},created_time,is_hidden");
+        var res = await GetJson($"{Base}/{providerPostId}/comments?filter=toplevel&order=reverse_chronological&limit=50&fields={fields}&access_token={Uri.EscapeDataString(account.AccessToken)}", ct);
+        var list = new List<ProviderComment>();
+        if (!res.TryGetProperty("data", out var data)) return list;
+        foreach (var c in data.EnumerateArray())
+        {
+            var id = c.TryGetProperty("id", out var i) ? i.GetString() : null;
+            var text = c.TryGetProperty("message", out var m) ? m.GetString() : null;
+            if (string.IsNullOrEmpty(id) || string.IsNullOrWhiteSpace(text)) continue;   // photo-only or empty comments have nothing to answer
+            string? authorId = null, authorName = null;
+            if (c.TryGetProperty("from", out var f)) { authorId = f.TryGetProperty("id", out var fi) ? fi.GetString() : null; authorName = f.TryGetProperty("name", out var fn) ? fn.GetString() : null; }
+            var at = c.TryGetProperty("created_time", out var ct2) && DateTimeOffset.TryParse(ct2.GetString(), out var parsed) ? parsed : DateTimeOffset.UtcNow;
+            list.Add(new ProviderComment(id, authorId, authorName, text, at, c.TryGetProperty("is_hidden", out var h) && h.ValueKind == JsonValueKind.True));
+        }
+        return list;
+    }
+
+    public async Task<string?> ReplyToCommentAsync(PostRequest account, string commentId, string text, CancellationToken ct)
+    {
+        var res = await Send(() => http.CreateClient("facebook").PostAsync($"{Base}/{commentId}/comments", new FormUrlEncodedContent(new Dictionary<string, string> { ["message"] = text, ["access_token"] = account.AccessToken }), ct), ct);
+        return res.TryGetProperty("id", out var id) ? id.GetString() : throw new PublishException(PublishErrorKind.Unknown, "Facebook did not return the new reply's id");
+    }
+
+    public async Task<bool> SetCommentHiddenAsync(PostRequest account, string commentId, bool hidden, CancellationToken ct)
+    {
+        var res = await Send(() => http.CreateClient("facebook").PostAsync($"{Base}/{commentId}", new FormUrlEncodedContent(new Dictionary<string, string> { ["is_hidden"] = hidden ? "true" : "false", ["access_token"] = account.AccessToken }), ct), ct);
+        return res.TryGetProperty("success", out var ok) && ok.ValueKind == JsonValueKind.True;
     }
 
     public async Task<bool> IsAccountValidAsync(string externalId, string accessToken, CancellationToken ct)

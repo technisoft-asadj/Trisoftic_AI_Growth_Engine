@@ -110,6 +110,22 @@ public sealed class ScriptedPublisher : TriSoftic.GrowthEngine.Modules.Publishin
 
     /// <summary>What the "network" reports for every post; null means the adapter cannot report on posts.</summary>
     public static volatile TriSoftic.GrowthEngine.Modules.Publishing.PostMetrics? PostFigures;
+    /// <summary>Comments the "network" holds per provider post id, and what was done to them. <see cref="ReplyFailure"/>: "unknown" (timeout after sending) or "permission".</summary>
+    public static readonly ConcurrentDictionary<string, List<TriSoftic.GrowthEngine.Modules.Publishing.ProviderComment>> CommentsByPost = new();
+    public static readonly List<(string CommentId, string Text)> Replies = [];
+    public static readonly List<string> HiddenComments = [];
+    public static volatile string? ReplyFailure;
+    public Task<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.ProviderComment>?> GetCommentsAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest account, string providerPostId, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.ProviderComment>?>(CommentsByPost.TryGetValue(providerPostId, out var l) ? l.ToList() : []);
+    public Task<string?> ReplyToCommentAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest account, string commentId, string text, CancellationToken ct)
+    {
+        if (ReplyFailure == "unknown") throw new TriSoftic.GrowthEngine.Modules.Publishing.PublishException(TriSoftic.GrowthEngine.Modules.Publishing.PublishErrorKind.Unknown, "timeout");
+        if (ReplyFailure == "permission") throw new TriSoftic.GrowthEngine.Modules.Publishing.PublishException(TriSoftic.GrowthEngine.Modules.Publishing.PublishErrorKind.Permanent, "(#200) Requires pages_manage_engagement permission");
+        lock (Replies) { Replies.Add((commentId, text)); return Task.FromResult<string?>("reply-" + Replies.Count); }
+    }
+    public Task<bool> SetCommentHiddenAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest account, string commentId, bool hidden, CancellationToken ct)
+    { lock (HiddenComments) HiddenComments.Add(commentId); return Task.FromResult(true); }
+
     /// <summary>What the "network" reports about the Page itself; null means the adapter cannot report on the Page.</summary>
     public static volatile IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageFigureResult>? PageFigures;
     public Task<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageFigureResult>?> GetPageFiguresAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest account, DateOnly from, DateOnly to, CancellationToken ct)

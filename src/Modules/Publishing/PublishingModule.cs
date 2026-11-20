@@ -42,6 +42,7 @@ public static class PublishingModule
         s.AddScoped<IJobHandler, PullInsightsHandler>();
         s.AddScoped<IJobHandler, PullPostMetricsHandler>();
         s.AddScoped<IJobHandler, PullPageFiguresHandler>();
+        s.AddScoped<IJobHandler, PullCommentsHandler>();
         s.AddScoped<IPostPerformanceReader, PostPerformanceReader>();
         if (runScheduler || c.GetValue<bool>("Jobs:RunInProcess")) s.AddHostedService<PublishingScheduler>();
         return s;
@@ -55,6 +56,7 @@ public static class PublishingModule
         MapAccounts(g);
         MapFailures(g);
         MapPageHealth(g);
+        CommentEndpoints.Map(g);
         MapCallback(app);
         return app;
     }

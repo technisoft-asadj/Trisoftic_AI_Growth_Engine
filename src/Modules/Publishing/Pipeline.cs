@@ -207,6 +207,7 @@ public sealed class PublishingScheduler(IServiceScopeFactory scopes, IClock cloc
                 await jobs.EnqueueAsync(new JobRequest(PullInsightsHandler.PullJob, "{}", IdempotencyKey: $"insights:{t / 21600}"), stoppingToken);
                 await jobs.EnqueueAsync(new JobRequest(PullPostMetricsHandler.PullJob, "{}", IdempotencyKey: $"postmetrics:{t / 10800}"), stoppingToken);   // every 3 hours
                 await jobs.EnqueueAsync(new JobRequest(PullPageFiguresHandler.PullJob, "{}", IdempotencyKey: $"pagefigures:{t / 21600}"), stoppingToken);   // every 6 hours
+                await jobs.EnqueueAsync(new JobRequest(PullCommentsHandler.PullJob, "{}", IdempotencyKey: $"comments:{t / 1800}"), stoppingToken);   // every 30 minutes
             }
             catch (Exception) when (!stoppingToken.IsCancellationRequested) { /* next minute */ }
             await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken).ConfigureAwait(false);

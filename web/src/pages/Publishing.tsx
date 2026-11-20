@@ -11,17 +11,18 @@ interface Post { contentItemId: string; version: number; providerPostId: string;
 const err = (e: unknown) => (e instanceof ApiError ? e.message : e ? 'Something went wrong' : null)
 
 export function PublishingPage() {
-  const [tab, setTab] = useState<'failed' | 'channels' | 'posts'>('failed')
+  const [tab, setTab] = useState<'failed' | 'channels' | 'posts' | 'comments'>('failed')
   return (
     <>
       <h1>Publishing</h1>
       <p className="muted">Approved posts go out at their scheduled time. A post is only marked Published once the network confirms it.</p>
       <div className="tabs">
-        {(['failed', 'channels', 'posts'] as const).map((t) => <button key={t} className={t === tab ? 'active link' : 'link'} onClick={() => setTab(t)}>{{ failed: 'Needs attention', channels: 'Channels', posts: 'Published' }[t]}</button>)}
+        {(['failed', 'channels', 'posts', 'comments'] as const).map((t) => <button key={t} className={t === tab ? 'active link' : 'link'} onClick={() => setTab(t)}>{{ failed: 'Needs attention', channels: 'Channels', posts: 'Published', comments: 'Comments' }[t]}</button>)}
       </div>
       {tab === 'failed' && <Failures />}
       {tab === 'channels' && <Channels />}
       {tab === 'posts' && <Posts />}
+      {tab === 'comments' && <Comments />}
     </>
   )
 }
@@ -117,6 +118,86 @@ function Channels() {
         {err(sandbox.error ?? startFb.error) && <p className="error" role="alert">{err(sandbox.error ?? startFb.error)}</p>}
       </div>
     </>
+  )
+}
+
+interface CommentDto {
+  id: string; status: string; authorName: string | null; text: string; commentedAt: string; category: string | null; draft: string | null; suggestHide: boolean
+  missingFacts: string[]; replyText: string | null; repliedAt: string | null; hiddenAt: string | null; error: string | null; postUrl: string | null
+}
+
+/** Comments on the Page's posts. The AI only suggests; a person reads the exact reply, edits it and presses send. Nothing is ever answered automatically. */
+function Comments() {
+  const qc = useQueryClient()
+  const { pid, select } = useProductChoice()
+  const [show, setShow] = useState<'open' | 'done'>('open')
+  const list = useQuery({ queryKey: ['comments', pid], enabled: !!pid, queryFn: () => api.get<CommentDto[]>(`/api/v1/publishing/products/${pid}/comments`) })
+  const reload = () => void qc.invalidateQueries({ queryKey: ['comments', pid] })
+  const refresh = useMutation({ mutationFn: () => api.post(`/api/v1/publishing/products/${pid}/comments/refresh`), onSuccess: () => setTimeout(reload, 6000) })
+  const check = useMutation({ mutationFn: () => api.post<{ ok: boolean; problem: string | null; comments?: number }>(`/api/v1/publishing/products/${pid}/comments/check`) })
+  const draftNew = useMutation({ mutationFn: () => api.post<{ considered: number; drafted: number; stoppedBecause: string | null }>(`/api/v1/publishing/products/${pid}/comments/draft-new`), onSuccess: reload })
+  const rows = (list.data ?? []).filter((c) => (show === 'open' ? c.status === 'New' || c.status === 'Drafted' : c.status !== 'New' && c.status !== 'Drafted'))
+  const waiting = (list.data ?? []).filter((c) => c.status === 'New').length
+  return (
+    <>
+      <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: 12 }}>
+        {select}
+        <button className="secondary" disabled={refresh.isPending} onClick={() => refresh.mutate()}>{refresh.isSuccess ? 'Checking Facebook…' : 'Check for new comments'}</button>
+        <button disabled={draftNew.isPending || waiting === 0} onClick={() => draftNew.mutate()}>{draftNew.isPending ? 'Drafting…' : `Suggest replies for new comments (${waiting})`}</button>
+        <button className={show === 'open' ? 'link active' : 'link'} onClick={() => setShow('open')}>Waiting for you</button>
+        <button className={show === 'done' ? 'link active' : 'link'} onClick={() => setShow('done')}>Done</button>
+      </div>
+      <p className="muted">New comments are fetched every 30 minutes. Suggestions use only the verified product facts. A reply is posted only when you press Send, once per comment, never in bulk.</p>
+      {draftNew.data && <p className="muted">Suggested {draftNew.data.drafted} of {draftNew.data.considered}.{draftNew.data.stoppedBecause && ` Stopped: ${draftNew.data.stoppedBecause}`}</p>}
+      {err(refresh.error ?? draftNew.error ?? list.error) && <p className="error" role="alert">{err(refresh.error ?? draftNew.error ?? list.error)}</p>}
+      {list.isSuccess && rows.length === 0 && <p className="muted">{show === 'open' ? 'No comments are waiting.' : 'Nothing answered, hidden or ignored yet.'}</p>}
+      {list.isSuccess && (list.data?.length ?? 0) === 0 && (
+        <p><button className="secondary" disabled={check.isPending} onClick={() => check.mutate()}>{check.isPending ? 'Asking Facebook…' : 'Test the connection'}</button>{' '}
+          {check.data && (check.data.ok ? <span className="badge ok">Facebook answered: {check.data.comments} comment{check.data.comments === 1 ? '' : 's'} on your newest post</span> : <span className="error">{check.data.problem}</span>)}</p>
+      )}
+      {rows.map((c) => <CommentCard key={c.id} c={c} onChanged={reload} />)}
+    </>
+  )
+}
+
+function CommentCard({ c, onChanged }: { c: CommentDto; onChanged: () => void }) {
+  const [text, setText] = useState(c.draft ?? '')
+  const [synced, setSynced] = useState(c.draft ?? '')
+  if ((c.draft ?? '') !== synced) { setSynced(c.draft ?? ''); setText(c.draft ?? '') }   // a fresh suggestion replaces the box
+  const base = `/api/v1/publishing/comments/${c.id}`
+  const draft = useMutation({ mutationFn: () => api.post(`${base}/draft`), onSuccess: onChanged })
+  const send = useMutation({ mutationFn: () => api.post(`${base}/send`, { text }), onSuccess: onChanged, onError: onChanged })
+  const hide = useMutation({ mutationFn: () => api.post(`${base}/hide`), onSuccess: onChanged })
+  const ignore = useMutation({ mutationFn: () => api.post(`${base}/ignore`), onSuccess: onChanged })
+  const open = c.status === 'New' || c.status === 'Drafted'
+  const busy = draft.isPending || send.isPending || hide.isPending || ignore.isPending
+  const problem = err(draft.error ?? send.error ?? hide.error ?? ignore.error) ?? c.error
+  return (
+    <div className="card">
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <strong>{c.authorName ?? 'Someone'}</strong>
+        <span className="muted">{new Date(c.commentedAt).toLocaleString()}{c.postUrl && <> · <a href={c.postUrl} target="_blank" rel="noreferrer">the post</a></>}</span>
+      </div>
+      <p style={{ whiteSpace: 'pre-wrap' }}>{c.text}</p>
+      {c.category && <span className={c.category === 'Spam' || c.category === 'Abuse' ? 'badge warn' : 'badge'}>{c.category}</span>}
+      {c.status === 'Replied' && <p><span className="badge ok">Replied</span> {c.repliedAt && new Date(c.repliedAt).toLocaleString()}<br /><span style={{ whiteSpace: 'pre-wrap' }}>{c.replyText}</span></p>}
+      {c.status === 'Hidden' && <p><span className="badge warn">Hidden on Facebook</span></p>}
+      {c.status === 'Ignored' && <p><span className="badge">Ignored</span></p>}
+      {open && (
+        <>
+          {c.missingFacts.length > 0 && <p className="muted">The AI needs a fact it was not given, so it wrote no reply: {c.missingFacts.join('; ')}. Add it to the product profile, or write the reply yourself.</p>}
+          {c.suggestHide && <p className="muted">This looks like spam or abuse. The AI wrote no reply. You can hide it, which keeps it visible only to its author and their friends.</p>}
+          <label>Your reply<textarea rows={3} value={text} maxLength={8000} onChange={(e) => setText(e.target.value)} placeholder="Write a reply, or press Suggest a reply" /></label>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button className="secondary" disabled={busy} onClick={() => draft.mutate()}>{draft.isPending ? 'Thinking…' : c.draft ? 'Suggest again' : 'Suggest a reply'}</button>
+            <button disabled={busy || text.trim().length === 0} onClick={() => { if (window.confirm('Post this reply publicly on your Facebook Page?\n\n' + text)) send.mutate() }}>{send.isPending ? 'Sending…' : 'Approve and send'}</button>
+            <button className="secondary" disabled={busy} onClick={() => ignore.mutate()}>Ignore</button>
+            <button className={c.suggestHide ? '' : 'secondary'} disabled={busy} onClick={() => { if (window.confirm('Hide this comment on Facebook?')) hide.mutate() }}>Hide on Facebook</button>
+          </div>
+        </>
+      )}
+      {problem && <p className="error" role="alert">{problem}</p>}
+    </div>
   )
 }
 

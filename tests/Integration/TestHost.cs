@@ -32,6 +32,7 @@ public sealed class TestHost : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("Storage:Root", Path.Combine(Path.GetTempPath(), "te-test-objects-" + Guid.NewGuid().ToString("N")));
         builder.UseSetting("Scheduling:LinkSecret", "test-link-secret-0123456789abcdef");
         builder.UseSetting("Publishing:AllowSandbox", "true");
+        builder.UseSetting("Publishing:Comments:MaxRepliesPerHour", "5");
         builder.UseSetting("Messaging:PublicBaseUrl", "https://app.test");
         builder.UseSetting("Messaging:LinkSecret", "test-unsubscribe-secret-0123456789");
         builder.UseSetting("Messaging:FooterText", "TriSoftic Test Ltd, 1 Test Street, Lahore");

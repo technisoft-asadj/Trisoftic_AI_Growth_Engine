@@ -170,6 +170,101 @@ namespace TriSoftic.GrowthEngine.Modules.Publishing.Migrations
                     b.ToTable("pending_connections", "publishing");
                 });
 
+            modelBuilder.Entity("TriSoftic.GrowthEngine.Modules.Publishing.PostComment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AuthorName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Category")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTimeOffset>("CommentedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Draft")
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<DateTimeOffset?>("DraftedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(600)
+                        .HasColumnType("character varying(600)");
+
+                    b.Property<DateTimeOffset>("FetchedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("HiddenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("HiddenBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MissingFacts")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ProviderCommentId")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("ProviderReplyId")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<Guid>("PublishedPostId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("RepliedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RepliedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReplyText")
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<bool>("SuggestHide")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId", "ProviderCommentId")
+                        .IsUnique();
+
+                    b.HasIndex("ProductId", "Status", "CommentedAt");
+
+                    b.ToTable("post_comments", "publishing");
+                });
+
             modelBuilder.Entity("TriSoftic.GrowthEngine.Modules.Publishing.PostMetricSnapshot", b =>
                 {
                     b.Property<Guid>("Id")

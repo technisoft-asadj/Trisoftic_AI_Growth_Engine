@@ -98,6 +98,41 @@ public sealed class PageFigure : IOrganizationScoped
     public DateTimeOffset MeasuredAt { get; set; }
 }
 
+public enum CommentStatus { New, Drafted, Sending, Replied, Ignored, Hidden }
+
+/// <summary>
+/// A public comment on one of our published posts, with a suggested reply and what a person decided. A reply is only ever sent after a person approved its
+/// exact text (<see cref="ReplyText"/> and <see cref="RepliedBy"/>), once per comment.
+/// </summary>
+public sealed class PostComment : IOrganizationScoped
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid OrganizationId { get; set; }
+    public Guid ProductId { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid PublishedPostId { get; set; }
+    public string ProviderCommentId { get; set; } = "";
+    public string? AuthorName { get; set; }
+    public string Text { get; set; } = "";
+    public DateTimeOffset CommentedAt { get; set; }
+    public DateTimeOffset FetchedAt { get; set; }
+    public CommentStatus Status { get; set; }
+    /// <summary>Question, Praise, Complaint, BugReport, Spam, Abuse or Other, as judged by the AI. Empty until a reply was drafted.</summary>
+    public string? Category { get; set; }
+    public string? Draft { get; set; }
+    public bool SuggestHide { get; set; }
+    /// <summary>Facts the AI needed but the verified profile lacks, one per line.</summary>
+    public string? MissingFacts { get; set; }
+    public DateTimeOffset? DraftedAt { get; set; }
+    public string? ReplyText { get; set; }
+    public Guid? RepliedBy { get; set; }
+    public DateTimeOffset? RepliedAt { get; set; }
+    public string? ProviderReplyId { get; set; }
+    public Guid? HiddenBy { get; set; }
+    public DateTimeOffset? HiddenAt { get; set; }
+    public string? Error { get; set; }
+}
+
 /// <summary>Between the provider's consent screen and choosing which page to connect. Short-lived; the token is encrypted.</summary>
 public sealed class PendingConnection : IOrganizationScoped
 {
@@ -119,6 +154,7 @@ public sealed class PublishingDbContext(DbContextOptions<PublishingDbContext> op
     public DbSet<PendingConnection> Pending => Set<PendingConnection>();
     public DbSet<PostMetricSnapshot> Snapshots => Set<PostMetricSnapshot>();
     public DbSet<PageFigure> PageFigures => Set<PageFigure>();
+    public DbSet<PostComment> Comments => Set<PostComment>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -161,6 +197,16 @@ public sealed class PublishingDbContext(DbContextOptions<PublishingDbContext> op
             e.Property(x => x.Figure).HasMaxLength(40); e.Property(x => x.MetricUsed).HasMaxLength(80); e.Property(x => x.Reason).HasMaxLength(500);
             e.HasIndex(x => new { x.AccountId, x.Figure, x.Day }).IsUnique();
             e.HasIndex(x => x.ProductId);
+        });
+        b.Entity<PostComment>(e =>
+        {
+            e.ToTable("post_comments"); e.HasKey(x => x.Id);
+            e.Property(x => x.ProviderCommentId).HasMaxLength(300); e.Property(x => x.AuthorName).HasMaxLength(300); e.Property(x => x.Text).HasMaxLength(8000);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20); e.Property(x => x.Category).HasMaxLength(20);
+            e.Property(x => x.Draft).HasMaxLength(8000); e.Property(x => x.MissingFacts).HasMaxLength(2000); e.Property(x => x.ReplyText).HasMaxLength(8000);
+            e.Property(x => x.ProviderReplyId).HasMaxLength(300); e.Property(x => x.Error).HasMaxLength(600);
+            e.HasIndex(x => new { x.AccountId, x.ProviderCommentId }).IsUnique();
+            e.HasIndex(x => new { x.ProductId, x.Status, x.CommentedAt });
         });
         b.Entity<PendingConnection>(e =>
         {
