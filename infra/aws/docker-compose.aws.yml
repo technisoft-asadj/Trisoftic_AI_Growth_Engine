@@ -1,0 +1,19 @@
+# Adds HTTPS in front of the stack. Use together with ../docker-compose.prod.yml:
+#   docker compose -f docker-compose.prod.yml -f aws/docker-compose.aws.yml --env-file prod.env -p growth up -d --build
+services:
+  web:
+    ports: !override ["127.0.0.1:8080:80"]   # only Caddy (same host network) reaches the web container
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [web]
+    ports: ["80:80", "443:443"]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS}
+    volumes:
+      - ./aws/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  caddy_data:
+  caddy_config:

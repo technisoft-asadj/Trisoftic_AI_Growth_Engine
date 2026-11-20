@@ -1,0 +1,6 @@
+# Terminates HTTPS (free Let's Encrypt certificate, renewed automatically) and passes everything to the web container.
+# SITE_ADDRESS is the public host name, for example 54-12-34-56.sslip.io or app.yourdomain.com.
+{$SITE_ADDRESS} {
+	encode gzip
+	reverse_proxy web:80
+}
