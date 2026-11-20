@@ -197,3 +197,16 @@ public sealed class ImageGenerator(
         return (product, global, images);
     }
 }
+
+/// <summary>The AI module's side of <see cref="IImageMaker"/>: the same generator, guards, caps and ledger as the editor's picture box.</summary>
+public sealed class ImageMaker(ImageGenerator gen) : IImageMaker
+{
+    public string? CheckBrief(string brief)
+        => string.IsNullOrWhiteSpace(brief) || brief.Length > ImagePrompt.MaxBriefLength ? $"Describe the picture in up to {ImagePrompt.MaxBriefLength} characters." : ImagePrompt.Refusal(brief);
+
+    public async Task<(Guid? AssetId, string? Error, decimal CostUsd)> MakeAsync(Guid productId, string brief, string aspectRatio, CancellationToken ct = default)
+    {
+        var r = await gen.GenerateAsync(new ImageRequest(productId, brief, aspectRatio), ct);
+        return r.IsSuccess ? (r.Value!.AssetId, null, r.Value.CostUsd) : (null, r.Error!.Message, 0m);
+    }
+}

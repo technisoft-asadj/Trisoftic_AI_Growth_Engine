@@ -142,6 +142,16 @@ namespace TriSoftic.GrowthEngine.Modules.Planning.Migrations
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("UseImages")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("UseVideos")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.HasKey("Id");
 
                     b.HasIndex("ProductId")
@@ -390,6 +400,10 @@ namespace TriSoftic.GrowthEngine.Modules.Planning.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
+                    b.Property<string>("ImageBrief")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid");
 
@@ -413,6 +427,10 @@ namespace TriSoftic.GrowthEngine.Modules.Planning.Migrations
                     b.Property<string>("Variant")
                         .HasMaxLength(4)
                         .HasColumnType("character varying(4)");
+
+                    b.Property<string>("Visual")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
 
                     b.HasKey("Id");
 

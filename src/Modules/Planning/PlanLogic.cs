@@ -9,7 +9,10 @@ namespace TriSoftic.GrowthEngine.Modules.Planning;
 public sealed record PlanSpec(string Name, string Goal, string Channel, string? Language, DateOnly StartDate, int Days, int EveryDays, TimeOnly TimeUtc);
 
 public sealed class Measure { public string Name { get; set; } = ""; public string Why { get; set; } = ""; }
-public sealed class PlannedPost { public string Angle { get; set; } = ""; public string Brief { get; set; } = ""; public string? HookType { get; set; } }
+public sealed class PlannedPost { public string Angle { get; set; } = ""; public string Brief { get; set; } = ""; public string? HookType { get; set; } public string? Visual { get; set; } public string? ImageBrief { get; set; } }
+
+/// <summary>What the planner may use for pictures and video in this plan.</summary>
+public sealed record VisualOptions(bool Images, int VideosAvailable);
 /// <summary>What the planner (AI) proposes. Dates and counts are never the AI's job: code works them out from the cadence.</summary>
 public sealed class PlanDraft
 {
@@ -71,7 +74,7 @@ public static class PlanLogic
 
     // ---------- planning ----------
 
-    public static string BuildPlanSystem(ApprovedKnowledge k, int slots)
+    public static string BuildPlanSystem(ApprovedKnowledge k, int slots, VisualOptions? visuals = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"You are the growth planner for the product \"{k.ProductName}\" ({k.Kind}, {k.Lifecycle}).");
@@ -84,6 +87,16 @@ public static class PlanLogic
         sb.AppendLine("4. \"rationale\": 2-5 sentences on why this mix suits the goal. \"measures\": 2-5 things to look at afterwards to judge whether the plan worked, each with a short reason. Name only things a social network reports for a post (reactions, comments, shares, views, reach, link clicks).");
         sb.AppendLine("5. Do not promise results. Do not state any number you were not given.");
         sb.AppendLine("6. Give every slot a \"hookType\", exactly one of: " + string.Join(", ", HookTypes.All) + ". Use a mix across the series.");
+        if (visuals is not null)
+        {
+            sb.AppendLine("7. Give every slot a \"visual\": \"text\" (words only), \"image\" or \"video\". Choose whatever is most likely to reach the goal. Where the LEADERBOARD has solid evidence for a visual type, favour it; otherwise mix them so the results teach us something (for example about a third text-only, a third with a picture, the rest video where possible).");
+            sb.AppendLine(visuals.VideosAvailable > 0
+                ? $"   \"video\" is a Reel made from the owner's own uploaded vertical videos. Only {visuals.VideosAvailable} such video(s) are available for this plan, so use \"video\" at most {visuals.VideosAvailable} time(s)."
+                : "   No uploaded videos are available, so never use \"video\".");
+            sb.AppendLine(visuals.Images
+                ? "   For \"image\" also give \"imageBrief\": ONE sentence describing a flat cartoon-style scene that illustrates the post. It must contain NO people, faces, crowds or hands, NO phone or game screens, gameplay or app interface, NO logos, text, words or numbers. Only objects and scenes (for example a dice rolling across a colourful board, a trophy on a podium made of game pieces)."
+                : "   Pictures are switched off, so never use \"image\".");
+        }
         sb.AppendLine();
         sb.AppendLine("PRODUCT SUMMARY: " + k.Summary);
         sb.AppendLine("PLATFORMS: " + (k.Platforms.Count == 0 ? "(not specified)" : string.Join(", ", k.Platforms)));
@@ -96,7 +109,7 @@ public static class PlanLogic
         foreach (var c in k.Claims.Where(c => c.Prohibited)) sb.AppendLine($"- {c.Text}");
         sb.AppendLine($"BRAND VOICE: tone={k.Tone ?? "(unspecified)"}; do: {string.Join("; ", k.Dos)}; don't: {string.Join("; ", k.Donts)}");
         sb.AppendLine();
-        sb.AppendLine("Respond with ONE JSON object and nothing else: {\"rationale\": string, \"measures\": [{\"name\": string, \"why\": string}], \"slots\": [{\"angle\": string, \"brief\": string, \"hookType\": string}]}");
+        sb.AppendLine("Respond with ONE JSON object and nothing else: {\"rationale\": string, \"measures\": [{\"name\": string, \"why\": string}], \"slots\": [{\"angle\": string, \"brief\": string, \"hookType\": string, \"visual\": string (only when visuals are allowed), \"imageBrief\": string (only for image)}]}");
         return sb.ToString();
     }
 
@@ -130,9 +143,21 @@ public static class PlanLogic
         catch (JsonException ex) { error = "The answer was not valid JSON: " + ex.Message; return null; }
     }
 
-    public static List<string> ValidatePlan(PlanDraft d, int expectedSlots, LeaderboardResult? table = null, IEnumerable<string?>? profileTexts = null)
+    public static List<string> ValidatePlan(PlanDraft d, int expectedSlots, LeaderboardResult? table = null, IEnumerable<string?>? profileTexts = null, VisualOptions? visuals = null, Func<string, string?>? checkBrief = null)
     {
         var v = new List<string>();
+        if (visuals is not null)
+        {
+            if (d.Slots.Any(s => s.Visual is not ("text" or "image" or "video"))) v.Add("Every slot needs a visual: text, image or video.");
+            if (!visuals.Images && d.Slots.Any(s => s.Visual == "image")) v.Add("Pictures are switched off: do not use image.");
+            var videos = d.Slots.Count(s => s.Visual == "video");
+            if (videos > visuals.VideosAvailable) v.Add($"You used video {videos} time(s) but only {visuals.VideosAvailable} uploaded video(s) are available.");
+            foreach (var s in d.Slots.Where(s => s.Visual == "image"))
+            {
+                var why = string.IsNullOrWhiteSpace(s.ImageBrief) || s.ImageBrief.Length > 300 ? "An image needs an imageBrief of up to 300 characters." : checkBrief?.Invoke(s.ImageBrief);
+                if (why is not null) { v.Add($"imageBrief \"{(s.ImageBrief ?? "").Trim()}\" is not allowed: {why}"); break; }
+            }
+        }
         if (d.Slots.Any(s => !HookTypes.IsValid(s.HookType))) v.Add("hookType must be exactly one of: " + string.Join(", ", HookTypes.All) + ".");
         var bad = Leaderboard.FiguresNotInTable(new[] { d.Rationale }.Concat(d.Measures.SelectMany(m => new[] { m.Name, m.Why })).Concat(d.Slots.SelectMany(s => new[] { s.Angle, s.Brief })), table, profileTexts);
         if (bad.Count > 0) v.Add("These figures are not in the leaderboard you were given: " + string.Join(", ", bad) + ". Quote only figures from the leaderboard; if there is none, quote no figures.");

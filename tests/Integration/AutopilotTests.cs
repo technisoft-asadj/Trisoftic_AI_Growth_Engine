@@ -55,7 +55,7 @@ public sealed class AutopilotTests(TestHost host)
     {
         rationale = "A short run that introduces the product.",
         measures = new[] { new { name = "Reactions and comments", why = "shows interest" } },
-        slots = Enumerable.Range(1, n).Select(i => new { angle = $"Angle {i} " + Letters(), brief = "Cover a verified fact.", hookType = "Question" }),
+        slots = Enumerable.Range(1, n).Select(i => new { angle = $"Angle {i} " + Letters(), brief = "Cover a verified fact.", hookType = "Question", visual = "text" }),
     });
 
     private static string PostJson(string body) => JsonSerializer.Serialize(new { title = "Offline", body, claims = new[] { new { text = "Works offline", factRef = "f-offline", assumption = false } }, questions = Array.Empty<string>() });

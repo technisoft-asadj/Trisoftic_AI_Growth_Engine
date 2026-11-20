@@ -58,6 +58,10 @@ public sealed class PlanSlot : IOrganizationScoped
     public int Attempts { get; set; }
     /// <summary>Set when this post is one variant of a hook test (the same message opened in different ways, posted on different days).</summary>
     public Guid? TestId { get; set; }
+    /// <summary>What the planner chose for this post: text, image or video. Null for plans made without visuals.</summary>
+    public string? Visual { get; set; }
+    /// <summary>For an image: a one-sentence description of a flat cartoon scene (no people, screens, words or logos), used when no uploaded picture is available.</summary>
+    public string? ImageBrief { get; set; }
     public string? Variant { get; set; }
     /// <summary>What the reviewer objected to last time, passed to the next draft.</summary>
     public string? Guidance { get; set; }
@@ -100,6 +104,10 @@ public sealed class AutopilotSettings : IOrganizationScoped
     public TimeOnly PostTimeUtc { get; set; } = new(13, 0);
     /// <summary>Hard ceiling on posts per product, channel and UTC day, whatever the plan says.</summary>
     public int MaxPostsPerDay { get; set; } = 2;
+    /// <summary>May add pictures: the product's own uploaded pictures first, AI cartoon pictures otherwise.</summary>
+    public bool UseImages { get; set; } = true;
+    /// <summary>May post Reels from the product's own uploaded vertical videos.</summary>
+    public bool UseVideos { get; set; } = true;
     /// <summary>How far ahead posts are written and approved.</summary>
     public int LookaheadHours { get; set; } = 72;
     public Guid? UpdatedBy { get; set; }
@@ -181,7 +189,7 @@ public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> option
         b.Entity<PlanSlot>(e =>
         {
             e.ToTable("plan_slots"); e.HasKey(x => x.Id);
-            e.Property(x => x.Angle).HasMaxLength(300); e.Property(x => x.Brief).HasMaxLength(2000); e.Property(x => x.HookType).HasMaxLength(40); e.Property(x => x.Guidance).HasMaxLength(2000); e.Property(x => x.Variant).HasMaxLength(4); e.HasIndex(x => x.TestId);
+            e.Property(x => x.Angle).HasMaxLength(300); e.Property(x => x.Brief).HasMaxLength(2000); e.Property(x => x.HookType).HasMaxLength(40); e.Property(x => x.Guidance).HasMaxLength(2000); e.Property(x => x.Variant).HasMaxLength(4); e.Property(x => x.Visual).HasMaxLength(10); e.Property(x => x.ImageBrief).HasMaxLength(400); e.HasIndex(x => x.TestId);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             e.HasIndex(x => new { x.PlanId, x.Position }).IsUnique();
             e.HasOne<GrowthPlan>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
@@ -198,6 +206,7 @@ public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> option
         {
             e.ToTable("autopilot_settings"); e.HasKey(x => x.Id);
             e.Property(x => x.Channel).HasMaxLength(60); e.Property(x => x.Language).HasMaxLength(40); e.Property(x => x.Goal).HasMaxLength(2000); e.Property(x => x.LastRunNote).HasMaxLength(1000);
+            e.Property(x => x.UseImages).HasDefaultValue(true); e.Property(x => x.UseVideos).HasDefaultValue(true);
             e.HasIndex(x => x.ProductId).IsUnique();
         });
         b.Entity<AutopilotDecision>(e =>

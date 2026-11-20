@@ -18,7 +18,10 @@ public sealed class Op<T>
     public static Op<T> Fail(OpError e) => new() { Error = e };
 }
 
-public sealed record DraftSlotResult(Guid SlotId, Guid ContentItemId, bool Submitted, string? SubmitError, IReadOnlyList<string> Questions);
+public sealed record DraftSlotResult(Guid SlotId, Guid ContentItemId, bool Submitted, string? SubmitError, IReadOnlyList<string> Questions, string? MediaNote = null);
+
+/// <summary>Which kinds of media the caller allows for a post. Null means whatever the slot asks for.</summary>
+public sealed record MediaPolicy(bool Images, bool Videos);
 public sealed record ScheduleOutcome(int Scheduled, IReadOnlyList<(int Position, string? Reason)> Skipped);
 
 /// <summary>
@@ -26,7 +29,7 @@ public sealed record ScheduleOutcome(int Scheduled, IReadOnlyList<(int Position,
 /// Permission checks belong to the caller.
 /// </summary>
 public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, IAiGenerator ai, IContentCatalog catalog, IPostPerformanceReader perf, IConfiguration cfg,
-    IContentDrafter drafter, IContentPlanner content, HookTestService tests, IClock clock, IAuditWriter audit)
+    IContentDrafter drafter, IContentPlanner content, HookTestService tests, IAssetCatalog assets, IImageMaker maker, IClock clock, IAuditWriter audit)
 {
     private static readonly Regex Placeholder = new(@"\[[^\]\r\n]{2,60}\]", RegexOptions.Compiled);
     private const int AiAttempts = 2;
@@ -38,7 +41,7 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
 
     // ---------- create ----------
 
-    public async Task<Op<Guid>> CreatePlanAsync(Guid productId, PlanSpec spec, Guid? fromReviewId, bool managed, Guid? actor, CancellationToken ct)
+    public async Task<Op<Guid>> CreatePlanAsync(Guid productId, PlanSpec spec, Guid? fromReviewId, bool managed, Guid? actor, CancellationToken ct, VisualOptions? visuals = null)
     {
         var errors = PlanLogic.Validate(spec, DateOnly.FromDateTime(clock.UtcNow.UtcDateTime));
         if (errors.Count > 0) return Op<Guid>.Fail(new OpError(400, "The plan is not valid.", errors));
@@ -61,7 +64,7 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
         var slotCount = PlanLogic.SlotCount(spec.Days, spec.EveryDays);
         var table = await LeaderboardEndpoint.BuildAsync(catalog, perf, cfg, productId, spec.Channel, ct);
         var testLines = await tests.ConcludedSummariesAsync(productId, ct);
-        var system = PlanLogic.BuildPlanSystem(k, slotCount); var user = PlanLogic.BuildPlanUser(spec, slotCount, learnings, table.IsEmpty ? null : Leaderboard.ForPrompt(table));
+        var system = PlanLogic.BuildPlanSystem(k, slotCount, visuals); var user = PlanLogic.BuildPlanUser(spec, slotCount, learnings, table.IsEmpty ? null : Leaderboard.ForPrompt(table));
         if (testLines.Count > 0) user += "\n\nHOOK TEST RESULTS (small samples: indications, not proof; \"no clear winner\" means the hook types performed alike). You may quote these figures:\n- " + string.Join("\n- ", testLines) + "\n";
         PlanDraft? draft = null; AiResult? last = null; decimal cost = 0; List<string> violations = [];
         try
@@ -72,7 +75,7 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
                 last = await ai.GenerateAsync(new AiRequest("plan.generate", AiTier.Strategy, system, prompt, productId, "plan.generate", 1, MaxTokens: 8000), ct);
                 cost += last.EstimatedCostUsd;
                 var parsed = PlanLogic.ParsePlan(last.Text, out var parseError);
-                violations = parsed is null ? [parseError!] : PlanLogic.ValidatePlan(parsed, slotCount, table, k.Facts.Select(f => f.Text).Concat(k.Claims.Select(c => c.Text)).Append(k.Summary).Concat(testLines));
+                violations = parsed is null ? [parseError!] : PlanLogic.ValidatePlan(parsed, slotCount, table, k.Facts.Select(f => f.Text).Concat(k.Claims.Select(c => c.Text)).Append(k.Summary).Concat(testLines), visuals, maker.CheckBrief);
                 if (violations.Count == 0) draft = parsed;
             }
         }
@@ -89,7 +92,7 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
         var times = PlanLogic.SlotTimes(spec);
         db.Plans.Add(plan);
         for (var i = 0; i < times.Count; i++)
-            db.Slots.Add(new PlanSlot { PlanId = plan.Id, Position = i + 1, ScheduledFor = times[i], Angle = draft.Slots[i].Angle.Trim(), Brief = draft.Slots[i].Brief.Trim(), HookType = draft.Slots[i].HookType, Status = SlotStatus.Planned });
+            db.Slots.Add(new PlanSlot { PlanId = plan.Id, Position = i + 1, ScheduledFor = times[i], Angle = draft.Slots[i].Angle.Trim(), Brief = draft.Slots[i].Brief.Trim(), HookType = draft.Slots[i].HookType, Status = SlotStatus.Planned, Visual = visuals is null ? null : draft.Slots[i].Visual, ImageBrief = visuals is not null && draft.Slots[i].Visual == "image" ? draft.Slots[i].ImageBrief?.Trim() : null });
         await db.SaveChangesAsync(ct);
         await audit.WriteAsync(new AuditEntry("plan.created", "GrowthPlan", plan.Id.ToString(), productId, plan.Name, After: new { plan.Days, slots = times.Count, plan.Channel, plan.Provider, plan.Model, plan.CostUsd, fromReview = from?.Id, managed }), ct);
         return Op<Guid>.Of(plan.Id);
@@ -97,7 +100,7 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
 
     // ---------- draft one post ----------
 
-    public async Task<Op<DraftSlotResult>> DraftSlotAsync(Guid planId, Guid slotId, CancellationToken ct)
+    public async Task<Op<DraftSlotResult>> DraftSlotAsync(Guid planId, Guid slotId, CancellationToken ct, MediaPolicy? policy = null)
     {
         var plan = await db.Plans.FirstOrDefaultAsync(p => p.Id == planId, ct);
         if (plan is null) return Op<DraftSlotResult>.Fail(new OpError(404, "Plan not found"));
@@ -116,6 +119,8 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
             var brief = $"{plan.Channel} post {slot.Position} of {all.Count} in a plan called \"{plan.Name}\". Plan goal: {plan.Goal}\nAngle for THIS post: {slot.Angle}\nGuidance: {slot.Brief}\n" +
                         $"The other posts in the series cover: {others}. Do not repeat their openings or points.\nKeep it short (under 600 characters), in the brand voice. If the facts include the product's store link, end with it exactly; never write a placeholder such as [link]." +
                         (string.IsNullOrWhiteSpace(slot.Guidance) ? "" : $"\nA reviewer rejected the previous draft of this post for these reasons. Do not repeat them: {slot.Guidance}");
+            var media = await ChooseMediaAsync(plan, slot, policy ?? new MediaPolicy(true, true), ct);
+            if (media.Describe is not null) brief += $"\nA {media.Describe} will be published with this post. Write only the text that goes with it. Do not describe what it shows beyond that, and never call an illustration a screenshot or real gameplay.";
             Result<DraftedContent> res;
             try { res = await drafter.DraftPostAsync(plan.ProductId, brief, plan.Channel, plan.Language, ct); }
             catch (AiException ex) { return Op<DraftSlotResult>.Fail(FromAi(ex)); }
@@ -124,17 +129,65 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
             var ph = Placeholder.Match(d.Body);
             if (ph.Success) return Op<DraftSlotResult>.Fail(new OpError(422, $"The draft contains a placeholder ({ph.Value}) because the profile lacks that information. Add it to the product profile (for example the store link as a fact), approve the profile, then try again."));
 
-            var itemId = await content.CreateAsync(new NewContent(plan.ProductId, $"{plan.Name} · Post {slot.Position}: {slot.Angle}", plan.Channel, "Post", plan.Language, d.Body, d.DraftId, null, slot.HookType), ct);
+            var itemId = await content.CreateAsync(new NewContent(plan.ProductId, $"{plan.Name} · Post {slot.Position}: {slot.Angle}", plan.Channel, media.Format, plan.Language, d.Body, d.DraftId, media.Assets, slot.HookType), ct);
             var submitted = await content.SubmitAsync(itemId, ct);
             await db.Slots.Where(s => s.Id == slotId).ExecuteUpdateAsync(x => x.SetProperty(s => s.Status, SlotStatus.Drafted).SetProperty(s => s.ContentItemId, itemId).SetProperty(s => s.DraftedAt, clock.UtcNow).SetProperty(s => s.Attempts, s => s.Attempts + 1), ct);
             done = true;
             await audit.WriteAsync(new AuditEntry("plan.slot-drafted", "GrowthPlan", planId.ToString(), plan.ProductId, $"{plan.Name} post {slot.Position}", After: new { itemId, submitted = submitted.Ok, submitError = submitted.Error }), ct);
-            return Op<DraftSlotResult>.Of(new DraftSlotResult(slotId, itemId, submitted.Ok, submitted.Error, d.Questions));
+            return Op<DraftSlotResult>.Of(new DraftSlotResult(slotId, itemId, submitted.Ok, submitted.Error, d.Questions, media.Note));
         }
         finally
         {
             if (!done) await db.Slots.Where(s => s.Id == slotId && s.Status == SlotStatus.Drafting).ExecuteUpdateAsync(x => x.SetProperty(s => s.Status, SlotStatus.Planned), CancellationToken.None);
         }
+    }
+
+    // ---------- media ----------
+
+    private sealed record MediaChoice(IReadOnlyList<Guid> Assets, string Format, string? Note, string? Describe);
+
+    private static bool RightsClear(AssetInfo a) => a.Rights is "Unrestricted" or "LicensedWithLimits";
+
+    /// <summary>Files the autopilot may use: not yet on any live post, not AI-made, with clear usage rights, oldest first.</summary>
+    private async Task<List<AssetInfo>> FreeFilesAsync(Guid productId, CancellationToken ct)
+    {
+        var used = await catalog.GetUsedAssetIdsAsync(productId, ct);
+        return [.. (await assets.ListAsync(productId, ct)).Where(a => !used.Contains(a.Id) && !a.IsSynthetic && RightsClear(a))];
+    }
+
+    private bool FitsReel(AssetInfo a, Guid productId) => MediaRules.IsVideo(a) && MediaRules.Validate("Reel", [a], productId, clock.UtcNow).Count == 0;
+    private bool FitsPost(AssetInfo a, Guid productId) => MediaRules.IsImage(a) && MediaRules.Validate("Post", [a], productId, clock.UtcNow).Count == 0;
+
+    /// <summary>How many uploaded vertical videos are free to become Reels.</summary>
+    public async Task<int> CountFreeVideosAsync(Guid productId, CancellationToken ct) => (await FreeFilesAsync(productId, ct)).Count(a => FitsReel(a, productId));
+
+    /// <summary>
+    /// Picks the media for a post the planner marked as image or video. The product's own uploads come first (a Reel from a free vertical video; a picture from a free uploaded image),
+    /// then an AI cartoon picture from the slot's brief. If none works the post goes out as text, and the note says why. AI pictures obey the same caps, budgets and brief rules as the editor.
+    /// </summary>
+    private async Task<MediaChoice> ChooseMediaAsync(GrowthPlan plan, PlanSlot slot, MediaPolicy policy, CancellationToken ct)
+    {
+        var visual = slot.Visual ?? "text";
+        var text = new MediaChoice([], "Post", null, null);
+        if (visual == "text") return text;
+        var free = await FreeFilesAsync(plan.ProductId, ct);
+        string? why = null;
+        if (visual == "video")
+        {
+            if (!policy.Videos) why = "Videos are switched off.";
+            else if (free.FirstOrDefault(a => FitsReel(a, plan.ProductId)) is { } v) return new([v.Id], "Reel", $"Reel from your video \"{v.Name}\".", $"short vertical video named \"{v.Name}\"");
+            else why = "No free vertical video was available.";
+        }
+        if (!policy.Images) return text with { Note = (why is null ? "" : why + " ") + "Pictures are switched off, so this is text only." };
+        if (free.FirstOrDefault(a => FitsPost(a, plan.ProductId)) is { } img) return new([img.Id], "Post", $"Used your picture \"{img.Name}\".", $"picture named \"{img.Name}\"");
+        if (string.IsNullOrWhiteSpace(slot.ImageBrief)) return text with { Note = (why is null ? "" : why + " ") + "No picture was available, so this is text only." };
+        try
+        {
+            var made = await maker.MakeAsync(plan.ProductId, slot.ImageBrief!, "1:1", ct);
+            if (made.AssetId is { } id) return new([id], "Post", (why is null ? "" : why + " ") + "Made an AI cartoon picture.", $"flat cartoon-style illustration ({slot.ImageBrief}); it is an illustration, not a screenshot or real gameplay");
+            return text with { Note = $"{why} No picture: {made.Error}".Trim() };
+        }
+        catch (AiException ex) { return text with { Note = $"{why} No picture ({ex.Message}), so this is text only.".Trim() }; }
     }
 
     // ---------- schedule ----------

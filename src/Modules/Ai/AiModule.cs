@@ -28,6 +28,7 @@ public static class AiModule
         s.AddScoped<GroundedGenerator>();
         s.AddScoped<IAiDraftLookup, AiDraftLookup>();
         s.AddScoped<IContentDrafter, ContentDrafter>();
+        s.AddScoped<IImageMaker, ImageMaker>();
         return s;
     }
 

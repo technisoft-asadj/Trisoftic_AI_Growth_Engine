@@ -7,7 +7,7 @@ import { useAuth } from '../auth.tsx'
 interface PlanSummary { id: string; name: string; goal: string; channel: string; startDate: string; days: number; status: string; slots: number; drafted: number }
 interface Results { publishedAt: string; url?: string; measuredAt?: string; reactions: number | null; comments: number | null; shares: number | null; views: number | null; reach: number | null; clicks: number | null; note?: string }
 interface Slot {
-  id: string; position: number; scheduledFor: string; angle: string; brief: string; hookType?: string | null; testId?: string | null; variant?: string | null; status: string; contentItemId?: string
+  id: string; position: number; scheduledFor: string; angle: string; brief: string; hookType?: string | null; testId?: string | null; variant?: string | null; visual?: string | null; imageBrief?: string | null; status: string; contentItemId?: string
   content?: { title: string; status: string; scheduledFor?: string; approved: boolean } | null; results?: Results | null
 }
 interface ReviewResult { headline: string; confidence: string; whatWorked: string[]; whatDidNot: string[]; learnings: string[]; nextPlan: { goal: string; suggestedAngles: { angle: string; why: string }[] }; caveats: string[] }
@@ -172,7 +172,7 @@ function PlanPage({ productId }: { productId: string }) {
           <tbody>{p.slots.map((s) => (
             <tr key={s.id}>
               <td>{s.position}</td><td>{local(s.scheduledFor)}</td>
-              <td><b>{s.angle}</b> {s.hookType && <span className="badge">{s.hookType}</span>}<div className="muted">{s.brief}</div></td>
+              <td><b>{s.angle}</b> {s.hookType && <span className="badge">{s.hookType}</span>} {s.visual && s.visual !== 'text' && <span className="badge">{s.visual === 'video' ? 'Reel' : 'Picture'}</span>}<div className="muted">{s.brief}</div></td>
               <td>{s.content ? <><span className={statusClass(s.content.status)}>{s.content.status}</span> <Link to={`/products/${p.productId}/content`}>open</Link>{s.results?.url && <> · <a href={s.results.url} target="_blank" rel="noreferrer">on {p.channel}</a></>}</> : <span className={statusClass(s.status)}>{s.status === 'Planned' ? 'Not written yet' : s.status}</span>}</td>
               <td>{dash(s.results?.reactions)}</td><td>{dash(s.results?.comments)}</td><td>{dash(s.results?.shares)}</td><td>{dash(s.results?.views)}</td><td>{dash(s.results?.clicks)}</td>
             </tr>

@@ -20,7 +20,7 @@ public sealed record AutopilotReport(IReadOnlyList<string> Notes);
 /// when a plan ends. It only touches plans it created itself. Anything the reviewer is unsure about, or that keeps failing, is left for a person (the "Needs you" list).
 /// </summary>
 public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductKnowledge knowledge, IAiGenerator ai, IContentCatalog catalog, IContentPublishSource source,
-    IAgentApprovals agent, HookTestService tests, IPauseSwitch pause, IClock clock, IAuditWriter audit)
+    IAgentApprovals agent, HookTestService tests, IAssetCatalog assetCatalog, IImageMaker maker, IPauseSwitch pause, IClock clock, IAuditWriter audit)
 {
     public const int MaxAttempts = 3;
     private const int MaxDraftsPerRun = 5;
@@ -73,7 +73,9 @@ public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductK
         // learn from the most recent review of any plan of this product
         var latest = await (from r in db.Reviews join p in db.Plans on r.PlanId equals p.Id where p.ProductId == s.ProductId orderby r.CreatedAt descending select r.Id).FirstOrDefaultAsync(ct);
         var spec = new PlanSpec($"Autopilot {start:yyyy-MM-dd}", s.Goal, s.Channel, s.Language, start, s.PlanDays, s.EveryDays, s.PostTimeUtc);
-        var r2 = await ops.CreatePlanAsync(s.ProductId, spec, latest == Guid.Empty ? null : latest, managed: true, actor: null, ct);
+        var videos = s.UseVideos ? await ops.CountFreeVideosAsync(s.ProductId, ct) : 0;
+        var visuals = s.UseImages || videos > 0 ? new VisualOptions(s.UseImages, videos) : null;
+        var r2 = await ops.CreatePlanAsync(s.ProductId, spec, latest == Guid.Empty ? null : latest, managed: true, actor: null, ct, visuals);
         if (r2.Ok) { notes.Add($"Planned {PlanLogic.SlotCount(s.PlanDays, s.EveryDays)} posts starting {start:yyyy-MM-dd}."); return; }
         notes.Add("Could not plan: " + r2.Error!.Title);
         if (r2.Error.Status is 402 or 503) throw new AiException(r2.Error.Title, r2.Error.Outcome == "Paused" ? AiOutcome.Paused : AiOutcome.BudgetBlocked);
@@ -87,8 +89,8 @@ public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductK
         var slots = await db.Slots.Where(x => planIds.Contains(x.PlanId) && x.Status == SlotStatus.Planned && x.Attempts < MaxAttempts && x.ScheduledFor <= horizon).OrderBy(x => x.ScheduledFor).Take(MaxDraftsPerRun).ToListAsync(ct);
         foreach (var slot in slots)
         {
-            var r = await ops.DraftSlotAsync(slot.PlanId, slot.Id, ct);
-            if (r.Ok) { notes.Add($"Wrote post {slot.Position}."); continue; }
+            var r = await ops.DraftSlotAsync(slot.PlanId, slot.Id, ct, new MediaPolicy(s.UseImages, s.UseVideos));
+            if (r.Ok) { notes.Add($"Wrote post {slot.Position}." + (r.Value!.MediaNote is { } mn ? " " + mn : "")); continue; }
             if (r.Error!.Status is 402 or 503) throw new AiException(r.Error.Title, r.Error.Outcome == "Paused" ? AiOutcome.Paused : AiOutcome.BudgetBlocked);
             // a draft that fails (for example a placeholder because a fact is missing) counts as an attempt, so it cannot loop and spend forever
             await db.Slots.Where(x => x.Id == slot.Id && x.Status == SlotStatus.Planned).ExecuteUpdateAsync(x => x.SetProperty(y => y.Attempts, y => y.Attempts + 1).SetProperty(y => y.Guidance, Trim(r.Error.Title, 500)), ct);
@@ -118,13 +120,18 @@ public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductK
             var others = recent.Where(b => b != c.Body).ToList();
 
             var gates = AutopilotGates.Check(c.Body, k, others);
+            var media = c.AssetIds is { Count: > 0 } ids ? await assetCatalog.GetAsync(ids, ct) : [];
+            gates.AddRange(AutopilotGates.CheckMedia(c.Format, media, s.ProductId, clock.UtcNow, c.Body, slot.ImageBrief, maker.CheckBrief));
+            var mediaNote = media.Count == 0 ? null : string.Join("; ", media.Select(m => m.IsSynthetic
+                ? $"an AI-generated cartoon-style illustration (brief: \"{slot.ImageBrief}\"), not a real screenshot"
+                : $"the owner's uploaded {(MediaRules.IsVideo(m) ? "vertical video" : "picture")} \"{m.Name}\" (you cannot see it; the text must not claim what it shows)"));
             ReviewerVerdict? verdict = null; string model = ""; decimal cost = 0;
             if (gates.All(g => g.Passed))
             {
                 string? err = null;
                 for (var attempt = 1; attempt <= 2 && verdict is null; attempt++)
                 {
-                    var prompt = AutopilotReviewer.BuildUser(c.Channel, slot.HookType, c.Body) + (attempt == 1 ? "" : $"\n\nYour previous answer was unusable ({err}). Return the JSON again.");
+                    var prompt = AutopilotReviewer.BuildUser(c.Channel, slot.HookType, c.Body, mediaNote) + (attempt == 1 ? "" : $"\n\nYour previous answer was unusable ({err}). Return the JSON again.");
                     var res = await ai.GenerateAsync(new AiRequest("autopilot.review", AiTier.Strategy, AutopilotReviewer.BuildSystem(k), prompt, s.ProductId, "autopilot.review", 1, MaxTokens: 1500), ct);
                     cost += res.EstimatedCostUsd; model = res.Model;
                     verdict = AutopilotReviewer.Parse(res.Text, out err);
@@ -276,7 +283,7 @@ public static class AutopilotRegistration
 
 public static class AutopilotEndpoints
 {
-    public sealed record SettingsRequest(bool Enabled, string? Channel, string? Language, string? Goal, int? PlanDays, int? EveryDays, string? PostTimeUtc, int? MaxPostsPerDay, int? LookaheadHours);
+    public sealed record SettingsRequest(bool Enabled, string? Channel, string? Language, string? Goal, int? PlanDays, int? EveryDays, string? PostTimeUtc, int? MaxPostsPerDay, int? LookaheadHours, bool? UseImages = null, bool? UseVideos = null);
 
     public static void Map(RouteGroupBuilder g)
     {
@@ -295,7 +302,7 @@ public static class AutopilotEndpoints
             var week = await db.Decisions.AsNoTracking().Where(d => d.ProductId == productId && d.CreatedAt >= since).GroupBy(d => d.Verdict).Select(x => new { verdict = x.Key, n = x.Count(), cost = x.Sum(y => y.CostUsd) }).ToListAsync(ct);
             return Results.Ok(new
             {
-                s.Enabled, s.Channel, s.Language, s.Goal, s.PlanDays, s.EveryDays, postTimeUtc = s.PostTimeUtc.ToString("HH:mm"), s.MaxPostsPerDay, s.LookaheadHours, s.LastRunAt, s.LastRunNote,
+                s.Enabled, s.Channel, s.Language, s.Goal, s.PlanDays, s.EveryDays, postTimeUtc = s.PostTimeUtc.ToString("HH:mm"), s.MaxPostsPerDay, s.LookaheadHours, s.UseImages, s.UseVideos, s.LastRunAt, s.LastRunNote,
                 needsYou, week,
                 decisions = decisions.Select(d => new { d.Id, d.ContentItemId, d.Version, d.Verdict, d.Attempt, d.Reasons, d.CostUsd, d.CreatedAt, checks = JsonSerializer.Deserialize<JsonElement>(d.ChecksJson) }),
             });
@@ -327,7 +334,7 @@ public static class AutopilotEndpoints
             var s = await db.Autopilot.FirstOrDefaultAsync(x => x.ProductId == productId, ct);
             var was = s?.Enabled ?? false;
             if (s is null) { s = new AutopilotSettings { ProductId = productId }; db.Autopilot.Add(s); }
-            s.Enabled = req.Enabled; s.Channel = channel; s.Language = language; s.Goal = goal; s.PlanDays = planDays; s.EveryDays = every; s.PostTimeUtc = time; s.MaxPostsPerDay = cap; s.LookaheadHours = look;
+            s.Enabled = req.Enabled; s.Channel = channel; s.Language = language; s.Goal = goal; s.PlanDays = planDays; s.EveryDays = every; s.PostTimeUtc = time; s.MaxPostsPerDay = cap; s.LookaheadHours = look; s.UseImages = req.UseImages ?? true; s.UseVideos = req.UseVideos ?? true;
             s.UpdatedBy = u.UserId; s.UpdatedAt = clock.UtcNow;
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry(req.Enabled ? (was ? "autopilot.updated" : "autopilot.enabled") : "autopilot.disabled", "Product", productId.ToString(), productId, goal.Length > 120 ? goal[..120] : goal, After: new { channel, planDays, every, cap, look }), ct);

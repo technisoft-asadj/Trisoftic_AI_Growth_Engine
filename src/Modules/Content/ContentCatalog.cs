@@ -3,11 +3,34 @@ using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 
 namespace TriSoftic.GrowthEngine.Modules.Content;
 
-public sealed class ContentCatalog(ContentDbContext db) : IContentCatalog
+public sealed class ContentCatalog(ContentDbContext db, IAssetCatalog assets) : IContentCatalog
 {
     public async Task<IReadOnlyList<PublishedPostTags>> GetPublishedAsync(Guid productId, string? channel, CancellationToken ct = default)
-        => await db.Items.AsNoTracking().Where(i => i.ProductId == productId && i.Status == ContentStatus.Published && i.PublishedAt != null && (channel == null || i.Channel.ToLower() == channel.ToLower()))
-            .Select(i => new PublishedPostTags(i.Id, i.Channel, i.Format, i.HookType, i.PublishedAt!.Value)).ToListAsync(ct);
+    {
+        var items = await db.Items.AsNoTracking().Where(i => i.ProductId == productId && i.Status == ContentStatus.Published && i.PublishedAt != null && (channel == null || i.Channel.ToLower() == channel.ToLower()))
+            .Select(i => new { i.Id, i.Channel, i.Format, i.HookType, PublishedAt = i.PublishedAt!.Value, i.CurrentVersion }).ToListAsync(ct);
+        if (items.Count == 0) return [];
+        var ids = items.Select(i => i.Id).ToList();
+        var versions = (await db.Versions.AsNoTracking().Where(v => ids.Contains(v.ContentItemId)).Select(v => new { v.ContentItemId, v.Number, v.AssetIdsJson }).ToListAsync(ct))
+            .ToDictionary(v => (v.ContentItemId, v.Number), v => v.AssetIdsJson);
+        var known = (await assets.ListAsync(productId, ct)).ToDictionary(a => a.Id);
+        string VisualOf(Guid item, int version)
+        {
+            if (!versions.TryGetValue((item, version), out var json) || !json.StartsWith('[')) return "Text only";
+            var files = (System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(json) ?? []).Select(id => known.GetValueOrDefault(id)).Where(a => a is not null).Select(a => a!).ToList();
+            if (files.Count == 0) return "Text only";
+            if (files.Any(MediaRules.IsVideo)) return "Video";
+            return files.All(a => a.IsSynthetic) ? "AI picture" : "Own picture";
+        }
+        return [.. items.Select(i => new PublishedPostTags(i.Id, i.Channel, i.Format, i.HookType, i.PublishedAt, VisualOf(i.Id, i.CurrentVersion)))];
+    }
+
+    public async Task<IReadOnlySet<Guid>> GetUsedAssetIdsAsync(Guid productId, CancellationToken ct = default)
+    {
+        var alive = await db.Items.AsNoTracking().Where(i => i.ProductId == productId && i.Status != ContentStatus.Cancelled && i.Status != ContentStatus.Rejected).Select(i => i.Id).ToListAsync(ct);
+        var json = await db.Versions.AsNoTracking().Where(v => alive.Contains(v.ContentItemId) && v.AssetIdsJson != "[]").Select(v => v.AssetIdsJson).ToListAsync(ct);
+        return json.Where(j => j.StartsWith('[')).SelectMany(j => System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(j) ?? []).ToHashSet();
+    }
 
     public async Task<int> CountOnDayAsync(Guid productId, string channel, DateOnly day, CancellationToken ct = default)
     {

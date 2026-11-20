@@ -11,8 +11,18 @@ public sealed record AssetInfo(Guid Id, Guid ProductId, string Name, string Cont
 public interface IAssetCatalog
 {
     Task<IReadOnlyList<AssetInfo>> GetAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct = default);
+    /// <summary>The product's files that have not been retired, oldest first.</summary>
+    Task<IReadOnlyList<AssetInfo>> ListAsync(Guid productId, CancellationToken ct = default);
     /// <summary>Opens the stored bytes. The caller disposes the stream. Null when the file is gone.</summary>
     Task<Stream?> OpenAsync(Guid id, CancellationToken ct = default);
+}
+
+/// <summary>Makes an AI cartoon-style picture for a post (implemented by the AI module). Throws AiException for budget, pause or provider problems.</summary>
+public interface IImageMaker
+{
+    /// <summary>The reason a picture brief is not acceptable (people, screens, gameplay, words, logos), or null when it is fine.</summary>
+    string? CheckBrief(string brief);
+    Task<(Guid? AssetId, string? Error, decimal CostUsd)> MakeAsync(Guid productId, string brief, string aspectRatio, CancellationToken ct = default);
 }
 
 /// <summary>An AI-made picture to be filed in a product's library. The assets module marks it synthetic and records where it came from.</summary>

@@ -201,6 +201,10 @@ public sealed class AssetCatalog(AssetsDbContext db, IObjectStorage storage) : I
         => await db.Assets.AsNoTracking().Where(a => ids.Contains(a.Id))
             .Select(a => new AssetInfo(a.Id, a.ProductId, a.Name, a.ContentType, a.SizeBytes, a.IsRetired, a.Rights.ToString(), a.RightsExpiresAt, a.IsSynthetic, a.DurationSeconds, a.Width, a.Height)).ToListAsync(ct);
 
+    public async Task<IReadOnlyList<AssetInfo>> ListAsync(Guid productId, CancellationToken ct = default)
+        => await db.Assets.AsNoTracking().Where(a => a.ProductId == productId && !a.IsRetired).OrderBy(a => a.Id)
+            .Select(a => new AssetInfo(a.Id, a.ProductId, a.Name, a.ContentType, a.SizeBytes, a.IsRetired, a.Rights.ToString(), a.RightsExpiresAt, a.IsSynthetic, a.DurationSeconds, a.Width, a.Height)).ToListAsync(ct);
+
     public async Task<Stream?> OpenAsync(Guid id, CancellationToken ct = default)
     {
         var key = await db.Assets.AsNoTracking().Where(a => a.Id == id).Select(a => a.StorageKey).FirstOrDefaultAsync(ct);

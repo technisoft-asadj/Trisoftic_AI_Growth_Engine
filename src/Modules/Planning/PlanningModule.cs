@@ -80,7 +80,7 @@ public static class PlanningModule
                     statuses.TryGetValue(s.ContentItemId ?? Guid.Empty, out var c); perfs.TryGetValue(s.ContentItemId ?? Guid.Empty, out var p);
                     return new
                     {
-                        s.Id, s.Position, s.ScheduledFor, s.Angle, s.Brief, s.HookType, s.TestId, s.Variant, s.Status, s.ContentItemId,
+                        s.Id, s.Position, s.ScheduledFor, s.Angle, s.Brief, s.HookType, s.TestId, s.Variant, s.Visual, s.ImageBrief, s.Status, s.ContentItemId,
                         content = c is null ? null : new { c.Title, c.Status, c.ScheduledFor, approved = c.ApprovedVersion == c.CurrentVersion },
                         results = p is null ? null : new { p.PublishedAt, p.Url, p.MeasuredAt, p.Reactions, p.Comments, p.Shares, p.Views, p.Reach, p.Clicks, p.Note },
                     };
@@ -145,7 +145,7 @@ public static class LeaderboardEndpoint
     {
         var posts = await catalog.GetPublishedAsync(productId, channel, ct);
         var figures = (await perf.GetAsync(posts.Select(p => p.ItemId).ToList(), ct)).ToDictionary(p => p.ContentItemId);
-        var rows = posts.Select(p => { figures.TryGetValue(p.ItemId, out var f); return new LeaderboardRow(p.ItemId, p.Format, p.HookType, p.PublishedAt, Leaderboard.Engagements(f), f?.Views); }).ToList();
+        var rows = posts.Select(p => { figures.TryGetValue(p.ItemId, out var f); return new LeaderboardRow(p.ItemId, p.Format, p.HookType, p.PublishedAt, Leaderboard.Engagements(f), f?.Views, p.Visual); }).ToList();
         return Leaderboard.Build(channel, cfg.GetValue("Planning:Leaderboard:UtcOffsetHours", 0), rows);
     }
 

@@ -45,12 +45,15 @@ public static class HookTypes
 }
 
 /// <summary>A published post with its tags, for the leaderboard.</summary>
-public sealed record PublishedPostTags(Guid ItemId, string Channel, string Format, string? HookType, DateTimeOffset PublishedAt);
+/// <summary>Visual is one of Text only, Own picture, AI picture or Video.</summary>
+public sealed record PublishedPostTags(Guid ItemId, string Channel, string Format, string? HookType, DateTimeOffset PublishedAt, string Visual = "Text only");
 
 /// <summary>Implemented by the content module.</summary>
 public interface IContentCatalog
 {
     Task<IReadOnlyList<PublishedPostTags>> GetPublishedAsync(Guid productId, string? channel, CancellationToken ct = default);
+    /// <summary>Every file already attached to a post that is still alive (not cancelled or rejected), so a file is not used twice.</summary>
+    Task<IReadOnlySet<Guid>> GetUsedAssetIdsAsync(Guid productId, CancellationToken ct = default);
     /// <summary>How many posts for the product and channel are scheduled, being published or published on the given UTC day.</summary>
     Task<int> CountOnDayAsync(Guid productId, string channel, DateOnly day, CancellationToken ct = default);
     /// <summary>The text of the product's posts that are scheduled or went out since the given time, for the duplicate check.</summary>

@@ -6,7 +6,7 @@ using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 namespace TriSoftic.GrowthEngine.Modules.Planning;
 
 /// <summary>One published post with the figures the network reported. A null figure was not reported and is never counted as zero.</summary>
-public sealed record LeaderboardRow(Guid ItemId, string Format, string? HookType, DateTimeOffset PublishedAt, int? Engagements, long? Views);
+public sealed record LeaderboardRow(Guid ItemId, string Format, string? HookType, DateTimeOffset PublishedAt, int? Engagements, long? Views, string Visual = "Text only");
 
 /// <summary>
 /// One line of the leaderboard. Averages cover only the posts that have the figure. With fewer than <see cref="Leaderboard.MinMeasured"/> measured posts the cell is labelled
@@ -64,6 +64,7 @@ public static class Leaderboard
         return new LeaderboardResult(channel, ZoneLabel(offsetHours), MinMeasured, rows.Count, rows.Count(r => r.Engagements is not null),
         [
             Dim("Format", r => r.Format),
+            Dim("Visual", r => r.Visual),
             Dim("Hook type", r => r.HookType ?? Untagged),
             Dim("Weekday", r => (r.PublishedAt + off).DayOfWeek.ToString(), dayOrder),
             Dim("Time slot", r => SlotOf(r.PublishedAt + off), slotCmp),
