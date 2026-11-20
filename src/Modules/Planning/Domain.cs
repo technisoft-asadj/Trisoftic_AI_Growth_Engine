@@ -56,6 +56,9 @@ public sealed class PlanSlot : IOrganizationScoped
     public string? HookType { get; set; }
     /// <summary>How many times the autopilot has drafted this slot. A rejected draft is rewritten; after the limit the slot is left for a person.</summary>
     public int Attempts { get; set; }
+    /// <summary>Set when this post is one variant of a hook test (the same message opened in different ways, posted on different days).</summary>
+    public Guid? TestId { get; set; }
+    public string? Variant { get; set; }
     /// <summary>What the reviewer objected to last time, passed to the next draft.</summary>
     public string? Guidance { get; set; }
     public SlotStatus Status { get; set; }
@@ -125,12 +128,38 @@ public sealed class AutopilotDecision : IOrganizationScoped
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+public enum HookTestStatus { Running, Concluded }
+
+/// <summary>
+/// The same grounded message opened in 2-3 different ways (hook types), posted in rotation on different days, then compared. A winner is declared only with enough measured posts per variant
+/// and a clear gap; "no clear winner" is a normal answer.
+/// </summary>
+public sealed class HookTest : IOrganizationScoped
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid OrganizationId { get; set; }
+    public Guid ProductId { get; set; }
+    public Guid PlanId { get; set; }
+    public string Name { get; set; } = "";
+    public string Channel { get; set; } = "";
+    public string Brief { get; set; } = "";
+    /// <summary>JSON array of {label, hookType}.</summary>
+    public string VariantsJson { get; set; } = "[]";
+    public int PostsPerVariant { get; set; }
+    public HookTestStatus Status { get; set; }
+    public string ResultJson { get; set; } = "{}";
+    public Guid? CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? ConcludedAt { get; set; }
+}
+
 public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> options) : DbContext(options)
 {
     public const string Schema = "planning";
     public DbSet<GrowthPlan> Plans => Set<GrowthPlan>();
     public DbSet<PlanSlot> Slots => Set<PlanSlot>();
     public DbSet<PlanReview> Reviews => Set<PlanReview>();
+    public DbSet<HookTest> HookTests => Set<HookTest>();
     public DbSet<AutopilotSettings> Autopilot => Set<AutopilotSettings>();
     public DbSet<AutopilotDecision> Decisions => Set<AutopilotDecision>();
 
@@ -152,10 +181,18 @@ public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> option
         b.Entity<PlanSlot>(e =>
         {
             e.ToTable("plan_slots"); e.HasKey(x => x.Id);
-            e.Property(x => x.Angle).HasMaxLength(300); e.Property(x => x.Brief).HasMaxLength(2000); e.Property(x => x.HookType).HasMaxLength(40); e.Property(x => x.Guidance).HasMaxLength(2000);
+            e.Property(x => x.Angle).HasMaxLength(300); e.Property(x => x.Brief).HasMaxLength(2000); e.Property(x => x.HookType).HasMaxLength(40); e.Property(x => x.Guidance).HasMaxLength(2000); e.Property(x => x.Variant).HasMaxLength(4); e.HasIndex(x => x.TestId);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             e.HasIndex(x => new { x.PlanId, x.Position }).IsUnique();
             e.HasOne<GrowthPlan>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<HookTest>(e =>
+        {
+            e.ToTable("hook_tests"); e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(200); e.Property(x => x.Channel).HasMaxLength(60); e.Property(x => x.Brief).HasMaxLength(2000);
+            e.Property(x => x.VariantsJson).HasColumnType("jsonb"); e.Property(x => x.ResultJson).HasColumnType("jsonb");
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.HasIndex(x => new { x.ProductId, x.CreatedAt });
         });
         b.Entity<AutopilotSettings>(e =>
         {

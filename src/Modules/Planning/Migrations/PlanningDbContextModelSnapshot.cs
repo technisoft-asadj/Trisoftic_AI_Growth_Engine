@@ -246,6 +246,68 @@ namespace TriSoftic.GrowthEngine.Modules.Planning.Migrations
                     b.ToTable("plans", "planning");
                 });
 
+            modelBuilder.Entity("TriSoftic.GrowthEngine.Modules.Planning.HookTest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Brief")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<DateTimeOffset?>("ConcludedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("PostsPerVariant")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ResultJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("VariantsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId", "CreatedAt");
+
+                    b.ToTable("hook_tests", "planning");
+                });
+
             modelBuilder.Entity("TriSoftic.GrowthEngine.Modules.Planning.PlanReview", b =>
                 {
                     b.Property<Guid>("Id")
@@ -345,7 +407,16 @@ namespace TriSoftic.GrowthEngine.Modules.Planning.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<Guid?>("TestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Variant")
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("TestId");
 
                     b.HasIndex("PlanId", "Position")
                         .IsUnique();

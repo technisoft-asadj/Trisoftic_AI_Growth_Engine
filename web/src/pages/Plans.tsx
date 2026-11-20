@@ -7,7 +7,7 @@ import { useAuth } from '../auth.tsx'
 interface PlanSummary { id: string; name: string; goal: string; channel: string; startDate: string; days: number; status: string; slots: number; drafted: number }
 interface Results { publishedAt: string; url?: string; measuredAt?: string; reactions: number | null; comments: number | null; shares: number | null; views: number | null; reach: number | null; clicks: number | null; note?: string }
 interface Slot {
-  id: string; position: number; scheduledFor: string; angle: string; brief: string; hookType?: string | null; status: string; contentItemId?: string
+  id: string; position: number; scheduledFor: string; angle: string; brief: string; hookType?: string | null; testId?: string | null; variant?: string | null; status: string; contentItemId?: string
   content?: { title: string; status: string; scheduledFor?: string; approved: boolean } | null; results?: Results | null
 }
 interface ReviewResult { headline: string; confidence: string; whatWorked: string[]; whatDidNot: string[]; learnings: string[]; nextPlan: { goal: string; suggestedAngles: { angle: string; why: string }[] }; caveats: string[] }
@@ -191,6 +191,8 @@ function PlanPage({ productId }: { productId: string }) {
         {schedule.data && <p>{schedule.data.scheduled} scheduled.{schedule.data.skipped.length > 0 && <> Left alone: {schedule.data.skipped.map((x) => `post ${x.position} (${x.reason})`).join('; ')}.</>}</p>}
       </div>
 
+      <HookTests planId={p.id} productId={p.productId} canManage={canManage && open} onChanged={refresh} />
+
       <div className="card">
         <h3>Results and what to do next</h3>
         {published === 0 ? <p className="muted">Nothing from this plan is published yet, so there is nothing to review.</p> : <p>{published} of {p.slots.length} posts are published.</p>}
@@ -218,5 +220,58 @@ function PlanPage({ productId }: { productId: string }) {
       {open && canManage && <p><button className="link" onClick={() => setStatus.mutate('Completed')}>Mark as completed</button> · <button className="link" onClick={() => { if (confirm('Cancel this plan? Posts already written stay in Content; cancel them there if you do not want them.')) setStatus.mutate('Cancelled') }}>Cancel plan</button></p>}
       <Err e={setStatus.error} />
     </>
+  )
+}
+
+interface VariantRow { label: string; hookType: string; planned: number; published: number; measured: number; avgEngagements: number | null; avgViews: number | null }
+interface TestRow { id: string; planId: string; name: string; status: string; postsPerVariant: number; minMeasured: number; variants: VariantRow[]; verdict: { status: string; winner: string | null; summary: string } }
+
+/** Hook tests: the same message opened in different ways, posted in turn on different days. A winner is only named with enough measured posts and a clear gap. */
+function HookTests({ planId, productId, canManage, onChanged }: { planId: string; productId: string; canManage: boolean; onChanged: () => void }) {
+  const qc = useQueryClient()
+  const tests = useQuery({ queryKey: ['hook-tests', productId], queryFn: () => api.get<TestRow[]>(`/api/v1/products/${productId}/hook-tests`) })
+  const hooks = useQuery({ queryKey: ['hook-types'], queryFn: () => api.get<string[]>('/api/v1/hook-types') })
+  const [name, setName] = useState('')
+  const [brief, setBrief] = useState('')
+  const [chosen, setChosen] = useState<string[]>([])
+  const [per, setPer] = useState(3)
+  const create = useMutation({
+    mutationFn: () => api.post(`/api/v1/plans/${planId}/hook-tests`, { name, brief, hookTypes: chosen, postsPerVariant: per }),
+    onSuccess: () => { setName(''); setBrief(''); setChosen([]); void qc.invalidateQueries({ queryKey: ['hook-tests', productId] }); onChanged() },
+  })
+  const conclude = useMutation({ mutationFn: () => api.post(`/api/v1/products/${productId}/hook-tests/conclude`), onSuccess: () => void qc.invalidateQueries({ queryKey: ['hook-tests', productId] }) })
+  const toggle = (h: string) => setChosen(chosen.includes(h) ? chosen.filter((x) => x !== h) : chosen.length < 3 ? [...chosen, h] : chosen)
+  const mine = (tests.data ?? []).filter((t) => t.planId === planId)
+  const dash = (v: number | null) => (v === null ? '—' : String(v))
+  return (
+    <div className="card">
+      <h3>Hook tests</h3>
+      <p className="muted">Post the same message opened in 2 or 3 different ways, taking turns on different days, and see which opening gets more engagement. The same message is never posted twice on one day. With small numbers, "no clear winner" is a normal answer.</p>
+      {mine.map((t) => (
+        <div key={t.id} className="card">
+          <b>{t.name}</b> <span className={t.status === 'Concluded' ? 'badge ok' : 'badge'}>{t.status}</span>
+          <table>
+            <thead><tr><th>Variant</th><th>Opens with</th><th>Posts</th><th>Published</th><th>Measured</th><th>Avg engagements</th><th>Avg views</th></tr></thead>
+            <tbody>{t.variants.map((v) => (
+              <tr key={v.label}><td>{v.label}{t.verdict.winner === v.label && <> <span className="badge ok">winner</span></>}</td><td>{v.hookType}</td><td>{v.planned}</td><td>{v.published}</td><td>{v.measured} of {t.minMeasured}+</td><td>{dash(v.avgEngagements)}</td><td>{dash(v.avgViews)}</td></tr>
+            ))}</tbody>
+          </table>
+          <p>{t.verdict.summary}</p>
+        </div>
+      ))}
+      {mine.some((t) => t.status === 'Running') && canManage && <button className="secondary" onClick={() => conclude.mutate()} disabled={conclude.isPending}>Record finished tests</button>}
+      {canManage && (
+        <form onSubmit={(e: FormEvent) => { e.preventDefault(); create.mutate() }}>
+          <label>Test name<input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} placeholder="Offline opening" /></label>
+          <label>Message to test<textarea rows={2} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={2000} placeholder="Say that the game can be played against the computer when friends are not around." /></label>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
+            {hooks.data?.map((h) => <label key={h}><input type="checkbox" checked={chosen.includes(h)} onChange={() => toggle(h)} /> {h}</label>)}
+          </div>
+          <label>Posts per variant<input type="number" min={3} max={5} value={per} onChange={(e) => setPer(Number(e.target.value))} /></label>
+          <button type="submit" disabled={create.isPending || chosen.length < 2 || !name.trim() || !brief.trim()}>Add test ({chosen.length * per} posts on {chosen.length * per} different days)</button>
+          <Err e={create.error ?? conclude.error} />
+        </form>
+      )}
+    </div>
   )
 }

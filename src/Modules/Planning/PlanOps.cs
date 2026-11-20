@@ -26,7 +26,7 @@ public sealed record ScheduleOutcome(int Scheduled, IReadOnlyList<(int Position,
 /// Permission checks belong to the caller.
 /// </summary>
 public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, IAiGenerator ai, IContentCatalog catalog, IPostPerformanceReader perf, IConfiguration cfg,
-    IContentDrafter drafter, IContentPlanner content, IClock clock, IAuditWriter audit)
+    IContentDrafter drafter, IContentPlanner content, HookTestService tests, IClock clock, IAuditWriter audit)
 {
     private static readonly Regex Placeholder = new(@"\[[^\]\r\n]{2,60}\]", RegexOptions.Compiled);
     private const int AiAttempts = 2;
@@ -60,7 +60,9 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
 
         var slotCount = PlanLogic.SlotCount(spec.Days, spec.EveryDays);
         var table = await LeaderboardEndpoint.BuildAsync(catalog, perf, cfg, productId, spec.Channel, ct);
+        var testLines = await tests.ConcludedSummariesAsync(productId, ct);
         var system = PlanLogic.BuildPlanSystem(k, slotCount); var user = PlanLogic.BuildPlanUser(spec, slotCount, learnings, table.IsEmpty ? null : Leaderboard.ForPrompt(table));
+        if (testLines.Count > 0) user += "\n\nHOOK TEST RESULTS (small samples: indications, not proof; \"no clear winner\" means the hook types performed alike). You may quote these figures:\n- " + string.Join("\n- ", testLines) + "\n";
         PlanDraft? draft = null; AiResult? last = null; decimal cost = 0; List<string> violations = [];
         try
         {
@@ -70,7 +72,7 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
                 last = await ai.GenerateAsync(new AiRequest("plan.generate", AiTier.Strategy, system, prompt, productId, "plan.generate", 1, MaxTokens: 8000), ct);
                 cost += last.EstimatedCostUsd;
                 var parsed = PlanLogic.ParsePlan(last.Text, out var parseError);
-                violations = parsed is null ? [parseError!] : PlanLogic.ValidatePlan(parsed, slotCount, table, k.Facts.Select(f => f.Text).Concat(k.Claims.Select(c => c.Text)).Append(k.Summary));
+                violations = parsed is null ? [parseError!] : PlanLogic.ValidatePlan(parsed, slotCount, table, k.Facts.Select(f => f.Text).Concat(k.Claims.Select(c => c.Text)).Append(k.Summary).Concat(testLines));
                 if (violations.Count == 0) draft = parsed;
             }
         }
@@ -162,6 +164,7 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
                 var day = DateOnly.FromDateTime(at.UtcDateTime);
                 if (await catalog.CountOnDayAsync(plan.ProductId, plan.Channel, day, ct) >= maxPerDay) { skipped.Add((s.Position, $"Already {maxPerDay} post(s) that day")); continue; }
             }
+            if (s.TestId is { } tid && await tests.SiblingOnDayAsync(tid, s.ContentItemId.Value, DateOnly.FromDateTime(at.UtcDateTime), ct)) { skipped.Add((s.Position, "Another variant of this test is already posting that day")); continue; }
             var r = await content.ScheduleAsync(s.ContentItemId.Value, at, ct);
             if (r.Ok) scheduled++; else skipped.Add((s.Position, r.Error));
         }

@@ -230,6 +230,73 @@ public sealed class PlanningTests(TestHost host)
     }
 
     [Fact]
+    public async Task A_hook_test_posts_variants_in_turn_on_different_days_never_twice_on_one_day_and_ends_with_no_clear_winner_when_they_tie()
+    {
+        var before = Clock.UtcNow;
+        try
+        {
+            var admin = await host.LoginAdminAsync(); var approver = await UserAsync(admin, "Approver");
+            var pid = await ProductAsync(admin, approver);
+            Script(PlanJson(3));
+            var planId = (await (await admin.PostAsJsonAsync($"/api/v1/products/{pid}/plans", NewPlan(Clock.UtcNow))).Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+
+            Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync($"/api/v1/plans/{planId}/hook-tests", new { name = "x", brief = "Works offline", hookTypes = new[] { "Question" }, postsPerVariant = 3 })).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync($"/api/v1/plans/{planId}/hook-tests", new { name = "x", brief = "Works offline", hookTypes = new[] { "Question", "Question" }, postsPerVariant = 3 })).StatusCode);
+            var created = await admin.PostAsJsonAsync($"/api/v1/plans/{planId}/hook-tests", new { name = "Offline opening", brief = "Say that the POS works offline.", hookTypes = new[] { "Question", "Tip" }, postsPerVariant = 3 });
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            var testId = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+
+            var plan = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/plans/{planId}", Json);
+            var testSlots = plan.GetProperty("slots").EnumerateArray().Where(s => s.GetProperty("testId").ValueKind != JsonValueKind.Null).ToList();
+            Assert.Equal(6, testSlots.Count);
+            Assert.Equal("ABABAB", string.Concat(testSlots.Select(s => s.GetProperty("variant").GetString())));
+            Assert.Equal(new[] { "Question", "Tip", "Question", "Tip", "Question", "Tip" }, testSlots.Select(s => s.GetProperty("hookType").GetString()).ToArray());
+            var days = testSlots.Select(s => s.GetProperty("scheduledFor").GetDateTimeOffset().UtcDateTime.Date).ToList();
+            Assert.Equal(6, days.Distinct().Count());   // never two on one day
+            Assert.True(days.Min() > plan.GetProperty("slots").EnumerateArray().Where(s => s.GetProperty("testId").ValueKind == JsonValueKind.Null).Max(s => s.GetProperty("scheduledFor").GetDateTimeOffset().UtcDateTime.Date));
+            Assert.All(testSlots, s => Assert.Contains("hook", s.GetProperty("brief").GetString()));
+
+            // nothing measured yet: not enough posts, and the figures are missing, not zero
+            var open = (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/products/{pid}/hook-tests", Json)).EnumerateArray().Single();
+            Assert.Equal("NotEnoughPosts", open.GetProperty("verdict").GetProperty("status").GetString());
+            Assert.Equal(JsonValueKind.Null, open.GetProperty("variants")[0].GetProperty("avgEngagements").ValueKind);
+
+            // write, approve and publish the six test posts (the three ordinary posts of the plan are left alone)
+            Script(Post, Post, Post, Post, Post, Post);
+            foreach (var s in testSlots) (await admin.PostAsync($"/api/v1/plans/{planId}/slots/{s.GetProperty("id").GetGuid()}/draft", null)).EnsureSuccessStatusCode();
+            plan = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/plans/{planId}", Json);
+            var items = plan.GetProperty("slots").EnumerateArray().Where(s => s.GetProperty("testId").ValueKind != JsonValueKind.Null).Select(s => s.GetProperty("contentItemId").GetGuid()).ToList();
+            foreach (var id in items) await Approve(admin, approver, id.ToString());
+            (await admin.PostAsync($"/api/v1/plans/{planId}/schedule", null)).EnsureSuccessStatusCode();
+
+            // the same-day rule is enforced when scheduling too: a sibling already on a day blocks another post of the test that day
+            using (var scope = host.Services.CreateScope())
+            {
+                var svc = scope.ServiceProvider.GetRequiredService<TriSoftic.GrowthEngine.Modules.Planning.HookTestService>();
+                Assert.True(await svc.SiblingOnDayAsync(testId, Guid.NewGuid(), DateOnly.FromDateTime(days[0]), default));
+                Assert.False(await svc.SiblingOnDayAsync(testId, Guid.NewGuid(), DateOnly.FromDateTime(days[0].AddDays(40)), default));
+            }
+
+            Clock.Advance(TimeSpan.FromDays(20));
+            await RunJobs("publishing.dispatch");
+            ScriptedPublisher.PostFigures = new(Reactions: 8, Comments: 2, Shares: 1, Views: null, Reach: null, Clicks: null, Note: null);   // every post reports the same
+            try { await RunJobs("publishing.pull-post-metrics"); } finally { ScriptedPublisher.PostFigures = null; }
+
+            Assert.Equal(1, (await (await admin.PostAsync($"/api/v1/products/{pid}/hook-tests/conclude", null)).Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("concluded").GetInt32());
+            var done = (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/products/{pid}/hook-tests", Json)).EnumerateArray().Single();
+            Assert.Equal("Concluded", done.GetProperty("status").GetString());
+            Assert.Equal("NoClearWinner", done.GetProperty("verdict").GetProperty("status").GetString());   // equal results: no winner is a normal answer
+            Assert.Equal(11m, done.GetProperty("variants")[0].GetProperty("avgEngagements").GetDecimal());
+
+            // the next plan is told the result, and may quote only its figures
+            Script(PlanJson(3)); FakeAiProvider.Prompts.Clear();
+            Assert.Equal(HttpStatusCode.Created, (await admin.PostAsJsonAsync($"/api/v1/products/{pid}/plans", NewPlan(Clock.UtcNow))).StatusCode);
+            Assert.Contains("HOOK TEST RESULTS", FakeAiProvider.Prompts.Single()); Assert.Contains("No clear winner", FakeAiProvider.Prompts.Single());
+        }
+        finally { Clock.Set(before); }
+    }
+
+    [Fact]
     public async Task Planning_refuses_bad_input_and_people_without_permission_and_cannot_start_without_an_approved_profile()
     {
         var admin = await host.LoginAdminAsync(); var approver = await UserAsync(admin, "Approver");

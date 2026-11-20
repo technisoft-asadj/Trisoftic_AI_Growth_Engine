@@ -20,7 +20,7 @@ public sealed record AutopilotReport(IReadOnlyList<string> Notes);
 /// when a plan ends. It only touches plans it created itself. Anything the reviewer is unsure about, or that keeps failing, is left for a person (the "Needs you" list).
 /// </summary>
 public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductKnowledge knowledge, IAiGenerator ai, IContentCatalog catalog, IContentPublishSource source,
-    IAgentApprovals agent, IPauseSwitch pause, IClock clock, IAuditWriter audit)
+    IAgentApprovals agent, HookTestService tests, IPauseSwitch pause, IClock clock, IAuditWriter audit)
 {
     public const int MaxAttempts = 3;
     private const int MaxDraftsPerRun = 5;
@@ -42,6 +42,7 @@ public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductK
                 else
                 {
                     // Each step re-reads the database: an earlier step updates rows directly, and a stale in-memory copy would hide that.
+                    if (await tests.ConcludeFinishedAsync(productId, ct) is > 0 and var done) notes.Add($"Concluded {done} hook test(s).");
                     await ReviewFinishedPlansAsync(s, notes, ct); db.ChangeTracker.Clear();
                     await EnsurePlanAsync(s, notes, ct); db.ChangeTracker.Clear();
                     await DraftAsync(s, notes, ct); db.ChangeTracker.Clear();
