@@ -41,6 +41,7 @@ public static class PublishingModule
         s.AddScoped<IJobHandler, TokenCheckHandler>();
         s.AddScoped<IJobHandler, PullInsightsHandler>();
         s.AddScoped<IJobHandler, PullPostMetricsHandler>();
+        s.AddScoped<IJobHandler, PullPageFiguresHandler>();
         s.AddScoped<IPostPerformanceReader, PostPerformanceReader>();
         if (runScheduler || c.GetValue<bool>("Jobs:RunInProcess")) s.AddHostedService<PublishingScheduler>();
         return s;
@@ -53,6 +54,7 @@ public static class PublishingModule
         var g = app.MapGroup("/api/v1/publishing").RequireAuthorization().WithTags("Publishing");
         MapAccounts(g);
         MapFailures(g);
+        MapPageHealth(g);
         MapCallback(app);
         return app;
     }
@@ -149,6 +151,42 @@ public static class PublishingModule
         {
             if (!u.HasPermission(Permissions.PublishingManage) || !await u.CanAccessProductAsync(productId, ct)) return Results.NotFound();
             await jobs.EnqueueAsync(new JobRequest(PullPostMetricsHandler.PullJob, "{}", IdempotencyKey: $"postmetrics-now:{clock.UtcNow.ToUnixTimeSeconds() / 60}"), ct);
+            return Results.Accepted();
+        });
+    }
+
+    private static void MapPageHealth(RouteGroupBuilder g)
+    {
+        // The Page's own figures: latest value, the last 28 days, and the follower change since the oldest reading in the last 7 days. A figure Facebook did not supply is null with the reason.
+        g.MapGet("/products/{productId:guid}/page-health", async (Guid productId, PublishingDbContext db, ICurrentUser u, IClock clock, CancellationToken ct) =>
+        {
+            if (!u.HasPermission(Permissions.PublishingManage) || !await u.CanAccessProductAsync(productId, ct)) return Results.NotFound();
+            var today = DateOnly.FromDateTime(clock.UtcNow.UtcDateTime);
+            var rows = await db.PageFigures.AsNoTracking().Where(f => f.ProductId == productId && f.Day >= today.AddDays(-28)).ToListAsync(ct);
+            var figures = new[] { "followers", "new_follows", "lost_follows", "page_views", "page_reach" }.Select(name =>
+            {
+                var mine = rows.Where(r => r.Figure == name).OrderBy(r => r.Day).ToList();
+                var withValue = mine.Where(r => r.Value is not null).ToList();
+                var last = withValue.LastOrDefault();
+                var lastMiss = mine.Where(r => r.Value is null).OrderByDescending(r => r.MeasuredAt).FirstOrDefault();
+                // follower change: latest level minus the oldest level in the last 7 days; only when there are two different days
+                var weekAgo = today.AddDays(-7);
+                var baseline = name == "followers" ? withValue.FirstOrDefault(r => r.Day >= weekAgo) : null;
+                long? change = name == "followers" && last is not null && baseline is not null && baseline.Day < last.Day ? last.Value - baseline.Value : null;
+                return new
+                {
+                    figure = name, value = last?.Value, day = last?.Day, metric = last?.MetricUsed, measuredAt = last?.MeasuredAt,
+                    reason = last is null ? lastMiss?.Reason : null, changeSince = change is null ? (DateOnly?)null : baseline!.Day, change,
+                    series = withValue.Select(r => new { day = r.Day, value = r.Value }).ToList(),
+                };
+            }).ToList();
+            return Results.Ok(new { figures });
+        });
+
+        g.MapPost("/products/{productId:guid}/page-health/refresh", async (Guid productId, ICurrentUser u, IJobQueue jobs, IClock clock, CancellationToken ct) =>
+        {
+            if (!u.HasPermission(Permissions.PublishingManage) || !await u.CanAccessProductAsync(productId, ct)) return Results.NotFound();
+            await jobs.EnqueueAsync(new JobRequest(PullPageFiguresHandler.PullJob, "{}", IdempotencyKey: $"pagefigures-now:{clock.UtcNow.ToUnixTimeSeconds() / 60}"), ct);
             return Results.Accepted();
         });
     }

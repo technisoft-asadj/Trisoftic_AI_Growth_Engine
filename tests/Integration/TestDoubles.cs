@@ -110,6 +110,10 @@ public sealed class ScriptedPublisher : TriSoftic.GrowthEngine.Modules.Publishin
 
     /// <summary>What the "network" reports for every post; null means the adapter cannot report on posts.</summary>
     public static volatile TriSoftic.GrowthEngine.Modules.Publishing.PostMetrics? PostFigures;
+    /// <summary>What the "network" reports about the Page itself; null means the adapter cannot report on the Page.</summary>
+    public static volatile IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageFigureResult>? PageFigures;
+    public Task<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageFigureResult>?> GetPageFiguresAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest account, DateOnly from, DateOnly to, CancellationToken ct)
+        => Task.FromResult(PageFigures);
     public Task<TriSoftic.GrowthEngine.Modules.Publishing.PostMetrics?> GetPostMetricsAsync(TriSoftic.GrowthEngine.Modules.Publishing.PostRequest account, string providerPostId, CancellationToken ct)
         => Task.FromResult(PostFigures);
 }

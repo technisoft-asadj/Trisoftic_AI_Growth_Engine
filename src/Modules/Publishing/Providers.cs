@@ -57,7 +57,18 @@ public interface IChannelPublisher
     /// Returns null when this adapter cannot report on posts at all.
     /// </summary>
     Task<PostMetrics?> GetPostMetricsAsync(PostRequest account, string providerPostId, CancellationToken ct) => Task.FromResult<PostMetrics?>(null);
+
+    /// <summary>
+    /// The Page's own figures: followers now, and per-day views, reach and follower changes. One result per figure, each saying which network metric
+    /// answered or why none did. Returns null when this adapter cannot report on the Page at all.
+    /// </summary>
+    Task<IReadOnlyList<PageFigureResult>?> GetPageFiguresAsync(PostRequest account, DateOnly from, DateOnly to, CancellationToken ct) => Task.FromResult<IReadOnlyList<PageFigureResult>?>(null);
 }
+
+public sealed record PageFigureValue(DateOnly Day, long Value);
+
+/// <summary>One Page figure. <see cref="Values"/> empty means the network supplied nothing, and <see cref="Reason"/> says why; it is never reported as zero.</summary>
+public sealed record PageFigureResult(string Figure, string? MetricUsed, string? Reason, IReadOnlyList<PageFigureValue> Values);
 
 /// <summary>Figures for one post. Every field is null when the network could not provide it; <see cref="Note"/> says why.</summary>
 public sealed record PostMetrics(int? Reactions, int? Comments, int? Shares, long? Views, long? Reach, int? Clicks, string? Note);
@@ -328,6 +339,59 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
 
         var note = missing.Count == 0 ? null : $"Facebook did not supply {string.Join(", ", missing)}. First reason: {firstReason}";
         return new PostMetrics(reactions, comments, shares, views, reach, (int?)clicks, note);
+    }
+
+    // Page figures. Meta renames and retires Page insight metrics (impressions became "views" in 2025, more changes were announced), so each figure has an
+    // ordered list of metric names, overridable in configuration (Publishing:Facebook:PageMetrics:page_views = "name1,name2") without a release.
+    private static readonly (string Figure, string[] Metrics)[] PageFigureDefs =
+    [
+        ("page_views", ["page_media_view", "page_impressions"]),
+        ("page_reach", ["page_total_media_view_unique", "page_impressions_unique"]),
+        ("new_follows", ["page_daily_follows_unique", "page_daily_follows"]),
+        ("lost_follows", ["page_daily_unfollows_unique"]),
+    ];
+
+    public async Task<IReadOnlyList<PageFigureResult>?> GetPageFiguresAsync(PostRequest account, DateOnly from, DateOnly to, CancellationToken ct)
+    {
+        var token = Uri.EscapeDataString(account.AccessToken);
+        var results = new List<PageFigureResult>();
+        static string Short(string s) => s.Length > 220 ? s[..220] : s;
+
+        // Followers: the Page's current count (a level, recorded for today). Likes ("fan_count") are a different number and are never substituted.
+        try
+        {
+            var res = await GetJson($"{Base}/{account.ExternalId}?fields=followers_count&access_token={token}", ct);
+            results.Add(res.TryGetProperty("followers_count", out var f) && f.ValueKind == JsonValueKind.Number
+                ? new PageFigureResult("followers", "followers_count", null, [new PageFigureValue(DateOnly.FromDateTime(DateTime.UtcNow), f.GetInt64())])
+                : new PageFigureResult("followers", null, "Facebook did not return followers_count for this Page", []));
+        }
+        catch (PublishException ex) when (ex.Kind is PublishErrorKind.Permanent or PublishErrorKind.AuthExpired) { results.Add(new PageFigureResult("followers", null, Short(ex.Message), [])); }
+
+        var since = new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).ToUnixTimeSeconds();
+        var until = new DateTimeOffset(to.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).ToUnixTimeSeconds();
+        foreach (var (figure, defaults) in PageFigureDefs)
+        {
+            var names = cfg[$"Publishing:Facebook:PageMetrics:{figure}"] is { Length: > 0 } o ? o.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries) : defaults;
+            string? reason = null; PageFigureResult? found = null;
+            foreach (var metric in names)
+            {
+                try
+                {
+                    var res = await GetJson($"{Base}/{account.ExternalId}/insights?metric={metric}&period=day&since={since}&until={until}&access_token={token}", ct);
+                    var values = new List<PageFigureValue>();
+                    foreach (var row in res.GetProperty("data").EnumerateArray())
+                        if (row.TryGetProperty("values", out var vals))
+                            foreach (var v in vals.EnumerateArray())
+                                if (v.TryGetProperty("value", out var n) && n.ValueKind == JsonValueKind.Number && v.TryGetProperty("end_time", out var et) && DateTimeOffset.TryParse(et.GetString(), out var end))
+                                    values.Add(new PageFigureValue(DateOnly.FromDateTime(end.UtcDateTime).AddDays(-1), n.GetInt64()));   // end_time closes the day, so the day itself is the one before
+                    if (values.Count > 0) { found = new PageFigureResult(figure, metric, null, values); break; }
+                    reason = $"{metric}: Facebook returned no values for this period";
+                }
+                catch (PublishException ex) when (ex.Kind is PublishErrorKind.Permanent or PublishErrorKind.AuthExpired) { reason = Short($"{metric}: {ex.Message}"); }   // refused or retired: try the next name
+            }
+            results.Add(found ?? new PageFigureResult(figure, null, reason ?? "no metric configured", []));
+        }
+        return results;
     }
 
     public async Task<bool> IsAccountValidAsync(string externalId, string accessToken, CancellationToken ct)

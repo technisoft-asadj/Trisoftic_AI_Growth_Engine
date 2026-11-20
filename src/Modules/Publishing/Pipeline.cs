@@ -206,6 +206,7 @@ public sealed class PublishingScheduler(IServiceScopeFactory scopes, IClock cloc
                 await jobs.EnqueueAsync(new JobRequest(TokenCheckHandler.CheckJob, "{}", IdempotencyKey: $"tokencheck:{t / 3600}"), stoppingToken);
                 await jobs.EnqueueAsync(new JobRequest(PullInsightsHandler.PullJob, "{}", IdempotencyKey: $"insights:{t / 21600}"), stoppingToken);
                 await jobs.EnqueueAsync(new JobRequest(PullPostMetricsHandler.PullJob, "{}", IdempotencyKey: $"postmetrics:{t / 10800}"), stoppingToken);   // every 3 hours
+                await jobs.EnqueueAsync(new JobRequest(PullPageFiguresHandler.PullJob, "{}", IdempotencyKey: $"pagefigures:{t / 21600}"), stoppingToken);   // every 6 hours
             }
             catch (Exception) when (!stoppingToken.IsCancellationRequested) { /* next minute */ }
             await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken).ConfigureAwait(false);
@@ -333,5 +334,59 @@ public sealed class PullInsightsHandler(PublishingDbContext db, IEnumerable<ICha
             catch (System.Security.Cryptography.CryptographicException) { /* unreadable token: flagged by the token check */ }
         }
         if (failure is not null) throw failure;
+    }
+}
+
+/// <summary>
+/// Pulls the Page's own figures (followers, views, reach, follower changes) for each connected account and keeps them per day, with the reason when Facebook
+/// supplied nothing. Followers are also recorded in analytics as a level. A figure the network refuses is stored as missing with its reason, never as zero.
+/// </summary>
+public sealed class PullPageFiguresHandler(PublishingDbContext db, IEnumerable<IChannelPublisher> publishers, TokenVault vault, IClock clock, IMetricSink? sink = null) : IJobHandler
+{
+    public const string PullJob = "publishing.pull-page-figures";
+    public const int WindowDays = 14;
+    public string Type => PullJob;
+    public PauseScope? PauseScope => null;   // read-only
+
+    public async Task HandleAsync(JobContext c, CancellationToken ct)
+    {
+        var now = clock.UtcNow; var today = DateOnly.FromDateTime(now.UtcDateTime);
+        TransientJobException? failure = null;
+        foreach (var a in await db.Accounts.AsNoTracking().Where(a => a.Status == AccountStatus.Connected).ToListAsync(ct))
+        {
+            var publisher = publishers.FirstOrDefault(p => p.Provider == a.Provider);
+            if (publisher is null) continue;
+            try
+            {
+                var results = await publisher.GetPageFiguresAsync(new PostRequest(a.ExternalId, vault.Open(a.TokenCipher), ""), today.AddDays(-WindowDays), today.AddDays(-1), ct);
+                if (results is null) continue;   // this adapter cannot report on the Page
+                var existing = await db.PageFigures.Where(f => f.AccountId == a.Id && f.Day >= today.AddDays(-WindowDays - 1)).ToListAsync(ct);
+                foreach (var r in results)
+                {
+                    if (r.Values.Count == 0)
+                    {
+                        // Nothing supplied: say so for today, so the page shows a dash with the reason and a once-good figure is not overwritten.
+                        Upsert(existing, a, r.Figure, today, null, null, r.Reason, now);
+                        continue;
+                    }
+                    foreach (var v in r.Values) Upsert(existing, a, r.Figure, v.Day, v.Value, r.MetricUsed, null, now);
+                }
+                await db.SaveChangesAsync(ct);
+                if (sink is not null && results.FirstOrDefault(r => r.Figure == "followers") is { Values.Count: > 0 } fol)
+                    await sink.RecordAsync($"{a.Provider}:{a.DisplayName} (page)", "Social", a.ProductId, fol.Values.Select(v => new MetricPoint(a.ProductId, "followers", v.Day, v.Day, v.Value, a.Channel)).ToList(), now, ct);
+            }
+            catch (PublishException ex) when (ex.Kind is PublishErrorKind.Retryable or PublishErrorKind.Unknown) { failure ??= new TransientJobException($"Page figures for '{a.DisplayName}': {ex.Message}", ex.RetryAfter); }
+            catch (PublishException) { /* auth/permanent: the token check flags the account */ }
+            catch (System.Security.Cryptography.CryptographicException) { /* unreadable token: flagged by the token check */ }
+        }
+        if (failure is not null) throw failure;
+    }
+
+    private void Upsert(List<PageFigure> existing, ChannelAccount a, string figure, DateOnly day, long? value, string? metric, string? reason, DateTimeOffset now)
+    {
+        var row = existing.FirstOrDefault(f => f.Figure == figure && f.Day == day);
+        if (row is null) { row = new PageFigure { AccountId = a.Id, ProductId = a.ProductId, Figure = figure, Day = day }; db.PageFigures.Add(row); existing.Add(row); }
+        else if (value is null && row.Value is not null) return;   // a refusal does not erase a figure that was reported
+        row.Value = value; row.MetricUsed = metric; row.Reason = reason is null ? null : (reason.Length > 480 ? reason[..480] : reason); row.MeasuredAt = now;
     }
 }

@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 using TriSoftic.GrowthEngine.Modules.Jobs;
+using TriSoftic.GrowthEngine.Modules.Publishing;
 
 namespace TriSoftic.GrowthEngine.Tests.Integration;
 
@@ -125,6 +126,62 @@ public sealed class PublishingTests(TestHost host)
         JsonElement T(string key) => summary.GetProperty("tiles").EnumerateArray().First(t => t.GetProperty("key").GetString() == key);
         Assert.Equal(15m, T("engagements").GetProperty("value").GetDecimal());
         Assert.Equal("Unavailable", T("impressions").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Page_figures_keep_a_refused_figure_empty_with_its_reason_and_never_erase_one_that_was_reported()
+    {
+        var admin = await host.LoginAdminAsync();
+        var pid = await ProductAsync(admin); await ConnectSandbox(admin, pid);
+        var runner = host.Services.GetRequiredService<JobRunner>();
+        async Task Pull()
+        {
+            using (var scope = host.Services.CreateScope())
+                await scope.ServiceProvider.GetRequiredService<IJobQueue>().EnqueueAsync(new JobRequest("publishing.pull-page-figures", "{}", IdempotencyKey: "pf-" + Guid.NewGuid()));
+            for (var k = 0; k < 100 && await runner.RunOnceAsync(default); k++) { }
+        }
+        async Task<JsonElement> Fig(string name) => (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/publishing/products/{pid}/page-health", Json)).GetProperty("figures").EnumerateArray().First(f => f.GetProperty("figure").GetString() == name);
+        var start = Clock.UtcNow; var today = DateOnly.FromDateTime(start.UtcDateTime);
+        PageFigureResult R(string f, string? metric, string? reason, params (int DaysAgo, long V)[] v) => new(f, metric, reason, v.Select(x => new PageFigureValue(today.AddDays(-x.DaysAgo), x.V)).ToList());
+
+        try
+        {
+            ScriptedPublisher.PageFigures = null;                                      // this adapter cannot report on the Page
+            await Pull();
+            Assert.Equal(JsonValueKind.Null, (await Fig("followers")).GetProperty("value").ValueKind);
+
+            ScriptedPublisher.PageFigures =
+            [
+                R("followers", "followers_count", null, (0, 120)),
+                R("page_views", "page_media_view", null, (2, 40), (1, 55)),
+                R("page_reach", null, "page_total_media_view_unique: (#100) The value must be a valid insights metric"),
+                R("new_follows", "page_daily_follows_unique", null, (1, 0)),            // a real zero is kept
+            ];
+            await Pull();
+            var followers = await Fig("followers");
+            Assert.Equal(120, followers.GetProperty("value").GetInt64()); Assert.Equal("followers_count", followers.GetProperty("metric").GetString());
+            Assert.Equal(JsonValueKind.Null, followers.GetProperty("change").ValueKind);   // one reading is not a change
+            Assert.Equal(2, (await Fig("page_views")).GetProperty("series").GetArrayLength());
+            var reach = await Fig("page_reach");
+            Assert.Equal(JsonValueKind.Null, reach.GetProperty("value").ValueKind);        // refused: empty, not zero
+            Assert.Contains("valid insights metric", reach.GetProperty("reason").GetString());
+            Assert.Equal(0, (await Fig("new_follows")).GetProperty("value").GetInt64());
+
+            // a later refusal does not erase what was reported
+            ScriptedPublisher.PageFigures = [R("followers", null, "Facebook did not return followers_count for this Page")];
+            await Pull();
+            Assert.Equal(120, (await Fig("followers")).GetProperty("value").GetInt64());
+
+            // two days later the count is higher: the change is measured from the first reading of the week
+            Clock.Advance(TimeSpan.FromDays(2)); var later = DateOnly.FromDateTime(Clock.UtcNow.UtcDateTime);
+            ScriptedPublisher.PageFigures = [new PageFigureResult("followers", "followers_count", null, [new PageFigureValue(later, 133)])];
+            await Pull();
+            followers = await Fig("followers");
+            Assert.Equal(133, followers.GetProperty("value").GetInt64());
+            Assert.Equal(13, followers.GetProperty("change").GetInt64());
+            Assert.Equal(today.ToString("yyyy-MM-dd"), followers.GetProperty("changeSince").GetString());
+        }
+        finally { ScriptedPublisher.PageFigures = null; Clock.Set(start); }
     }
 
     [Fact]

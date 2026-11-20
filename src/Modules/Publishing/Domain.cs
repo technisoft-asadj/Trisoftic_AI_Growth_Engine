@@ -81,6 +81,23 @@ public sealed class PostMetricSnapshot : IOrganizationScoped
     public string? Note { get; set; }
 }
 
+/// <summary>One figure about the Page itself (followers, views, reach, follower changes) for one day, or the reason Facebook supplied none. Null is never shown as zero.</summary>
+public sealed class PageFigure : IOrganizationScoped
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid OrganizationId { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid ProductId { get; set; }
+    /// <summary>followers, page_views, page_reach, new_follows, lost_follows.</summary>
+    public string Figure { get; set; } = "";
+    public DateOnly Day { get; set; }
+    public long? Value { get; set; }
+    /// <summary>Which of Facebook's metric names answered (they get renamed). Empty when nothing did.</summary>
+    public string? MetricUsed { get; set; }
+    public string? Reason { get; set; }
+    public DateTimeOffset MeasuredAt { get; set; }
+}
+
 /// <summary>Between the provider's consent screen and choosing which page to connect. Short-lived; the token is encrypted.</summary>
 public sealed class PendingConnection : IOrganizationScoped
 {
@@ -101,6 +118,7 @@ public sealed class PublishingDbContext(DbContextOptions<PublishingDbContext> op
     public DbSet<PublishedPost> Posts => Set<PublishedPost>();
     public DbSet<PendingConnection> Pending => Set<PendingConnection>();
     public DbSet<PostMetricSnapshot> Snapshots => Set<PostMetricSnapshot>();
+    public DbSet<PageFigure> PageFigures => Set<PageFigure>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -135,6 +153,13 @@ public sealed class PublishingDbContext(DbContextOptions<PublishingDbContext> op
             e.ToTable("post_metric_snapshots"); e.HasKey(x => x.Id);
             e.Property(x => x.Note).HasMaxLength(500);
             e.HasIndex(x => new { x.PublishedPostId, x.TakenAt });
+            e.HasIndex(x => x.ProductId);
+        });
+        b.Entity<PageFigure>(e =>
+        {
+            e.ToTable("page_figures"); e.HasKey(x => x.Id);
+            e.Property(x => x.Figure).HasMaxLength(40); e.Property(x => x.MetricUsed).HasMaxLength(80); e.Property(x => x.Reason).HasMaxLength(500);
+            e.HasIndex(x => new { x.AccountId, x.Figure, x.Day }).IsUnique();
             e.HasIndex(x => x.ProductId);
         });
         b.Entity<PendingConnection>(e =>

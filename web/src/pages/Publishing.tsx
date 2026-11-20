@@ -120,12 +120,61 @@ function Channels() {
   )
 }
 
+interface PageFigureDto { figure: string; value: number | null; day: string | null; metric: string | null; measuredAt: string | null; reason: string | null; change: number | null; changeSince: string | null; series: { day: string; value: number }[] }
+
+const figureLabel: Record<string, { name: string; help: string }> = {
+  followers: { name: 'Followers', help: 'People following the Page now' },
+  new_follows: { name: 'New followers', help: 'Gained that day' },
+  lost_follows: { name: 'Unfollows', help: 'Lost that day' },
+  page_views: { name: 'Page views', help: 'Times Page content was shown that day' },
+  page_reach: { name: 'Page reach', help: 'People who saw Page content that day' },
+}
+
+/** The Page's own figures from Facebook. A figure Facebook did not supply shows a dash and the reason, never a zero. */
+function PageHealth({ pid }: { pid: string }) {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['page-health', pid], enabled: !!pid, queryFn: () => api.get<{ figures: PageFigureDto[] }>(`/api/v1/publishing/products/${pid}/page-health`) })
+  const refresh = useMutation({ mutationFn: () => api.post(`/api/v1/publishing/products/${pid}/page-health/refresh`), onSuccess: () => setTimeout(() => void qc.invalidateQueries({ queryKey: ['page-health', pid] }), 8000) })
+  const figs = q.data?.figures ?? []
+  if (q.isSuccess && figs.every((f) => f.value === null && !f.reason)) return <p className="muted">No Page figures yet. They are pulled every 6 hours once a Facebook Page is connected with the read_insights permission.</p>
+  return (
+    <div className="card">
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <h2>Page health</h2>
+        <button className="secondary" disabled={refresh.isPending} onClick={() => refresh.mutate()}>{refresh.isSuccess ? 'Refreshing…' : 'Refresh now'}</button>
+      </div>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 16 }}>
+        {figs.map((f) => {
+          const label = figureLabel[f.figure] ?? { name: f.figure, help: '' }
+          const peak = Math.max(1, ...f.series.slice(-14).map((p) => p.value))
+          return (
+            <div key={f.figure} style={{ minWidth: 150 }} title={f.metric ? `Facebook metric: ${f.metric}` : undefined}>
+              <div className="muted">{label.name}</div>
+              <div style={{ fontSize: '1.6rem', fontWeight: 600 }}>{f.value === null ? '—' : f.value.toLocaleString()}</div>
+              {f.figure === 'followers' && f.change !== null && f.changeSince && <div className={f.change >= 0 ? 'badge ok' : 'badge warn'}>{f.change >= 0 ? '+' : ''}{f.change} since {f.changeSince}</div>}
+              {f.value !== null && f.figure !== 'followers' && f.day && <div className="muted">on {f.day}</div>}
+              {f.value === null && f.reason && <div className="muted" style={{ maxWidth: 220 }}>Not supplied by Facebook: {f.reason}</div>}
+              {f.series.length > 1 && f.figure !== 'followers' && (
+                <div aria-hidden style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 28, marginTop: 4 }}>
+                  {f.series.slice(-14).map((p) => <div key={p.day} title={`${p.day}: ${p.value}`} style={{ width: 8, height: Math.max(2, (p.value / peak) * 28), background: 'var(--accent, #6366f1)', opacity: 0.7, borderRadius: 2 }} />)}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <p className="muted">The newest day can still grow while Facebook finishes counting it.</p>
+    </div>
+  )
+}
+
 function Posts() {
   const { pid, select } = useProductChoice()
   const q = useQuery({ queryKey: ['pub-posts', pid], enabled: !!pid, queryFn: () => api.get<Post[]>(`/api/v1/publishing/products/${pid}/posts`) })
   return (
     <>
       <div className="row">{select}</div>
+      {pid && <PageHealth pid={pid} />}
       {q.data?.length === 0 && <p className="muted">Nothing published yet.</p>}
       {!!q.data?.length && (
         <table>

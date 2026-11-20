@@ -91,6 +91,53 @@ namespace TriSoftic.GrowthEngine.Modules.Publishing.Migrations
                     b.ToTable("channel_accounts", "publishing");
                 });
 
+            modelBuilder.Entity("TriSoftic.GrowthEngine.Modules.Publishing.PageFigure", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Figure")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("MeasuredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("MetricUsed")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<long?>("Value")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("AccountId", "Figure", "Day")
+                        .IsUnique();
+
+                    b.ToTable("page_figures", "publishing");
+                });
+
             modelBuilder.Entity("TriSoftic.GrowthEngine.Modules.Publishing.PendingConnection", b =>
                 {
                     b.Property<Guid>("Id")
