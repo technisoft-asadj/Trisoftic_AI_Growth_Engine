@@ -134,6 +134,10 @@ namespace TriSoftic.GrowthEngine.Modules.Content.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
+                    b.Property<string>("HookType")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<string>("Language")
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");

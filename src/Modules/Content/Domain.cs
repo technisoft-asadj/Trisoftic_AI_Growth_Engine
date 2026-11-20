@@ -40,6 +40,8 @@ public sealed class ContentItem : IOrganizationScoped
     public string Title { get; set; } = "";
     public string Channel { get; set; } = "";
     public string Format { get; set; } = "Post";
+    /// <summary>How the post opens (see <see cref="HookTypes"/>). A label for comparing results, not part of the approved text, so it can be set or corrected at any time.</summary>
+    public string? HookType { get; set; }
     public string? Language { get; set; }
     public int CurrentVersion { get; set; }
     /// <summary>Highest version that has been approved; may be lower than CurrentVersion after an edit.</summary>
@@ -200,6 +202,7 @@ public sealed class ContentDbContext(DbContextOptions<ContentDbContext> options)
             e.Property(x => x.Channel).HasMaxLength(60);
             e.Property(x => x.LastPublishError).HasMaxLength(1000);
             e.Property(x => x.Format).HasMaxLength(40);
+            e.Property(x => x.HookType).HasMaxLength(40);
             e.Property(x => x.Language).HasMaxLength(40);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             e.HasIndex(x => new { x.ProductId, x.Status });

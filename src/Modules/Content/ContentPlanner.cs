@@ -16,7 +16,7 @@ public sealed class ContentPlanner(ContentDbContext db, ICurrentUser user, IAppr
     {
         var format = ContentModule.Formats.Contains(c.Format) ? c.Format : "Post";
         var now = clock.UtcNow;
-        var item = new ContentItem { ProductId = c.ProductId, Title = c.Title.Trim()[..Math.Min(300, c.Title.Trim().Length)], Channel = c.Channel.Trim(), Format = format, Language = c.Language, CurrentVersion = 1, CreatedBy = user.UserId, CreatedAt = now, UpdatedAt = now };
+        var item = new ContentItem { ProductId = c.ProductId, Title = c.Title.Trim()[..Math.Min(300, c.Title.Trim().Length)], Channel = c.Channel.Trim(), Format = format, HookType = HookTypes.IsValid(c.HookType) ? c.HookType : null, Language = c.Language, CurrentVersion = 1, CreatedBy = user.UserId, CreatedAt = now, UpdatedAt = now };
         db.Items.Add(item);
         db.Versions.Add(new ContentVersion { ContentItemId = item.Id, Number = 1, Title = item.Title, Body = c.Body, Note = c.SourceDraftId is null ? "Created" : "Created from AI draft", SourceDraftId = c.SourceDraftId, AssetIdsJson = ContentVersion.ToJson(c.AssetIds ?? []), CreatedBy = user.UserId, CreatedAt = now });
         await db.SaveChangesAsync(ct);

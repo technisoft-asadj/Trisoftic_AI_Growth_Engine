@@ -13,7 +13,7 @@ public interface IContentDrafter
     Task<Result<DraftedContent>> DraftPostAsync(Guid productId, string brief, string? channel, string? language, CancellationToken ct = default);
 }
 
-public sealed record NewContent(Guid ProductId, string Title, string Channel, string Format, string? Language, string Body, Guid? SourceDraftId, IReadOnlyList<Guid>? AssetIds = null);
+public sealed record NewContent(Guid ProductId, string Title, string Channel, string Format, string? Language, string Body, Guid? SourceDraftId, IReadOnlyList<Guid>? AssetIds = null, string? HookType = null);
 
 public sealed record ContentStatusInfo(Guid ItemId, string Title, string Status, int CurrentVersion, int? ApprovedVersion, DateTimeOffset? ScheduledFor);
 
@@ -35,4 +35,20 @@ public sealed record PostPerformance(Guid ContentItemId, DateTimeOffset Publishe
 public interface IPostPerformanceReader
 {
     Task<IReadOnlyList<PostPerformance>> GetAsync(IReadOnlyCollection<Guid> contentItemIds, CancellationToken ct = default);
+}
+
+/// <summary>The fixed vocabulary for how a post opens. A post carries one of these (or none), so results can be compared like with like.</summary>
+public static class HookTypes
+{
+    public static readonly string[] All = ["Question", "Challenge", "Scenario", "Tip", "Announcement", "Behind the scenes", "Fun fact", "Direct call to action"];
+    public static bool IsValid(string? v) => v is null || All.Contains(v, StringComparer.Ordinal);
+}
+
+/// <summary>A published post with its tags, for the leaderboard.</summary>
+public sealed record PublishedPostTags(Guid ItemId, string Channel, string Format, string? HookType, DateTimeOffset PublishedAt);
+
+/// <summary>Implemented by the content module.</summary>
+public interface IContentCatalog
+{
+    Task<IReadOnlyList<PublishedPostTags>> GetPublishedAsync(Guid productId, string? channel, CancellationToken ct = default);
 }

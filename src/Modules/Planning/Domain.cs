@@ -50,6 +50,8 @@ public sealed class PlanSlot : IOrganizationScoped
     public DateTimeOffset ScheduledFor { get; set; }
     public string Angle { get; set; } = "";
     public string Brief { get; set; } = "";
+    /// <summary>How this post should open (see HookTypes). Carried onto the content item when the post is drafted.</summary>
+    public string? HookType { get; set; }
     public SlotStatus Status { get; set; }
     public Guid? ContentItemId { get; set; }
     public DateTimeOffset? DraftedAt { get; set; }
@@ -99,7 +101,7 @@ public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> option
         b.Entity<PlanSlot>(e =>
         {
             e.ToTable("plan_slots"); e.HasKey(x => x.Id);
-            e.Property(x => x.Angle).HasMaxLength(300); e.Property(x => x.Brief).HasMaxLength(2000);
+            e.Property(x => x.Angle).HasMaxLength(300); e.Property(x => x.Brief).HasMaxLength(2000); e.Property(x => x.HookType).HasMaxLength(40);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             e.HasIndex(x => new { x.PlanId, x.Position }).IsUnique();
             e.HasOne<GrowthPlan>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);

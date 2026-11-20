@@ -9,7 +9,7 @@ namespace TriSoftic.GrowthEngine.Modules.Planning;
 public sealed record PlanSpec(string Name, string Goal, string Channel, string? Language, DateOnly StartDate, int Days, int EveryDays, TimeOnly TimeUtc);
 
 public sealed class Measure { public string Name { get; set; } = ""; public string Why { get; set; } = ""; }
-public sealed class PlannedPost { public string Angle { get; set; } = ""; public string Brief { get; set; } = ""; }
+public sealed class PlannedPost { public string Angle { get; set; } = ""; public string Brief { get; set; } = ""; public string? HookType { get; set; } }
 /// <summary>What the planner (AI) proposes. Dates and counts are never the AI's job: code works them out from the cadence.</summary>
 public sealed class PlanDraft
 {
@@ -83,6 +83,7 @@ public static class PlanLogic
         sb.AppendLine("3. Vary the kind of post across the series (introduction, feature, audience scenario, a question to followers, a call to download or act) so the results show what the audience responds to.");
         sb.AppendLine("4. \"rationale\": 2-5 sentences on why this mix suits the goal. \"measures\": 2-5 things to look at afterwards to judge whether the plan worked, each with a short reason. Name only things a social network reports for a post (reactions, comments, shares, views, reach, link clicks).");
         sb.AppendLine("5. Do not promise results. Do not state any number you were not given.");
+        sb.AppendLine("6. Give every slot a \"hookType\", exactly one of: " + string.Join(", ", HookTypes.All) + ". Use a mix across the series.");
         sb.AppendLine();
         sb.AppendLine("PRODUCT SUMMARY: " + k.Summary);
         sb.AppendLine("PLATFORMS: " + (k.Platforms.Count == 0 ? "(not specified)" : string.Join(", ", k.Platforms)));
@@ -95,17 +96,23 @@ public static class PlanLogic
         foreach (var c in k.Claims.Where(c => c.Prohibited)) sb.AppendLine($"- {c.Text}");
         sb.AppendLine($"BRAND VOICE: tone={k.Tone ?? "(unspecified)"}; do: {string.Join("; ", k.Dos)}; don't: {string.Join("; ", k.Donts)}");
         sb.AppendLine();
-        sb.AppendLine("Respond with ONE JSON object and nothing else: {\"rationale\": string, \"measures\": [{\"name\": string, \"why\": string}], \"slots\": [{\"angle\": string, \"brief\": string}]}");
+        sb.AppendLine("Respond with ONE JSON object and nothing else: {\"rationale\": string, \"measures\": [{\"name\": string, \"why\": string}], \"slots\": [{\"angle\": string, \"brief\": string, \"hookType\": string}]}");
         return sb.ToString();
     }
 
-    public static string BuildPlanUser(PlanSpec s, int slots, string? learnings)
+    public static string BuildPlanUser(PlanSpec s, int slots, string? learnings, string? leaderboard = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Plan name: {s.Name}");
         sb.AppendLine($"Goal: {s.Goal}");
         sb.AppendLine($"Channel: {s.Channel}{(string.IsNullOrWhiteSpace(s.Language) ? "" : $" (language: {s.Language})")}");
         sb.AppendLine($"Length: {s.Days} day(s), {slots} post(s), one every {s.EveryDays} day(s), starting {s.StartDate:yyyy-MM-dd}.");
+        if (!string.IsNullOrWhiteSpace(leaderboard))
+        {
+            sb.AppendLine();
+            sb.AppendLine(leaderboard);
+            sb.AppendLine("Use the leaderboard: favour what has solid evidence, and test a format or hook type that is missing or marked TOO FEW. Quote only figures that appear in it; never compute a percentage or a figure of your own.");
+        }
         if (!string.IsNullOrWhiteSpace(learnings))
         {
             sb.AppendLine();
@@ -123,9 +130,12 @@ public static class PlanLogic
         catch (JsonException ex) { error = "The answer was not valid JSON: " + ex.Message; return null; }
     }
 
-    public static List<string> ValidatePlan(PlanDraft d, int expectedSlots)
+    public static List<string> ValidatePlan(PlanDraft d, int expectedSlots, LeaderboardResult? table = null, IEnumerable<string?>? profileTexts = null)
     {
         var v = new List<string>();
+        if (d.Slots.Any(s => !HookTypes.IsValid(s.HookType))) v.Add("hookType must be exactly one of: " + string.Join(", ", HookTypes.All) + ".");
+        var bad = Leaderboard.FiguresNotInTable(new[] { d.Rationale }.Concat(d.Measures.SelectMany(m => new[] { m.Name, m.Why })).Concat(d.Slots.SelectMany(s => new[] { s.Angle, s.Brief })), table, profileTexts);
+        if (bad.Count > 0) v.Add("These figures are not in the leaderboard you were given: " + string.Join(", ", bad) + ". Quote only figures from the leaderboard; if there is none, quote no figures.");
         if (d.Slots.Count != expectedSlots) v.Add($"Return exactly {expectedSlots} slots (you returned {d.Slots.Count}).");
         if (d.Slots.Any(s => string.IsNullOrWhiteSpace(s.Angle) || string.IsNullOrWhiteSpace(s.Brief))) v.Add("Every slot needs an angle and a brief.");
         if (d.Slots.Any(s => s.Angle.Length > 300 || s.Brief.Length > 2000)) v.Add("An angle must be under 300 characters and a brief under 2000.");

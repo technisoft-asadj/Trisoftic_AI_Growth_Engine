@@ -46,7 +46,7 @@ public static class PlanningModule
             return Results.Ok(plans.Select(p => new { p.Id, p.Name, p.Goal, p.Channel, p.StartDate, p.Days, p.Status, p.CreatedAt, slots = counts.GetValueOrDefault(p.Id)?.Slots ?? 0, drafted = counts.GetValueOrDefault(p.Id)?.Drafted ?? 0 }));
         });
 
-        g.MapPost("/products/{productId:guid}/plans", async (Guid productId, CreatePlanRequest req, PlanningDbContext db, ICurrentUser u, IProductKnowledge knowledge, IAiGenerator ai, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/products/{productId:guid}/plans", async (Guid productId, CreatePlanRequest req, PlanningDbContext db, ICurrentUser u, IProductKnowledge knowledge, IAiGenerator ai, IContentCatalog catalog, IPostPerformanceReader perf, IConfiguration cfg, IClock clock, IAuditWriter audit, CancellationToken ct) =>
         {
             if (!u.HasPermission(Permissions.CampaignsManage) || !u.HasPermission(Permissions.AiGenerate) || !await u.CanAccessProductAsync(productId, ct)) return Results.NotFound();
             var time = TimeOnly.TryParse(req.TimeUtc ?? "13:00", out var t) ? t : new TimeOnly(13, 0);
@@ -71,7 +71,8 @@ public static class PlanningModule
             }
 
             var slotCount = PlanLogic.SlotCount(spec.Days, spec.EveryDays);
-            var system = PlanLogic.BuildPlanSystem(k, slotCount); var user = PlanLogic.BuildPlanUser(spec, slotCount, learnings);
+            var table = await LeaderboardEndpoint.BuildAsync(catalog, perf, cfg, productId, spec.Channel, ct);
+            var system = PlanLogic.BuildPlanSystem(k, slotCount); var user = PlanLogic.BuildPlanUser(spec, slotCount, learnings, table.IsEmpty ? null : Leaderboard.ForPrompt(table));
             PlanDraft? draft = null; AiResult? last = null; decimal cost = 0; List<string> violations = [];
             try
             {
@@ -81,7 +82,7 @@ public static class PlanningModule
                     last = await ai.GenerateAsync(new AiRequest("plan.generate", AiTier.Strategy, system, prompt, productId, "plan.generate", 1, MaxTokens: 8000), ct);
                     cost += last.EstimatedCostUsd;
                     var parsed = PlanLogic.ParsePlan(last.Text, out var parseError);
-                    violations = parsed is null ? [parseError!] : PlanLogic.ValidatePlan(parsed, slotCount);
+                    violations = parsed is null ? [parseError!] : PlanLogic.ValidatePlan(parsed, slotCount, table, k.Facts.Select(f => f.Text).Concat(k.Claims.Select(c => c.Text)).Append(k.Summary));
                     if (violations.Count == 0) draft = parsed;
                 }
             }
@@ -98,11 +99,13 @@ public static class PlanningModule
             var times = PlanLogic.SlotTimes(spec);
             db.Plans.Add(plan);
             for (var i = 0; i < times.Count; i++)
-                db.Slots.Add(new PlanSlot { PlanId = plan.Id, Position = i + 1, ScheduledFor = times[i], Angle = draft.Slots[i].Angle.Trim(), Brief = draft.Slots[i].Brief.Trim(), Status = SlotStatus.Planned });
+                db.Slots.Add(new PlanSlot { PlanId = plan.Id, Position = i + 1, ScheduledFor = times[i], Angle = draft.Slots[i].Angle.Trim(), Brief = draft.Slots[i].Brief.Trim(), HookType = draft.Slots[i].HookType, Status = SlotStatus.Planned });
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry("plan.created", "GrowthPlan", plan.Id.ToString(), productId, plan.Name, After: new { plan.Days, slots = times.Count, plan.Channel, plan.Provider, plan.Model, plan.CostUsd, fromReview = from?.Id }), ct);
             return Results.Created($"/api/v1/plans/{plan.Id}", new { plan.Id });
         });
+
+        LeaderboardEndpoint.Map(g);
 
         g.MapGet("/plans/{id:guid}", async (Guid id, PlanningDbContext db, ICurrentUser u, IContentPlanner content, IPostPerformanceReader perf, CancellationToken ct) =>
         {
@@ -122,7 +125,7 @@ public static class PlanningModule
                     statuses.TryGetValue(s.ContentItemId ?? Guid.Empty, out var c); perfs.TryGetValue(s.ContentItemId ?? Guid.Empty, out var p);
                     return new
                     {
-                        s.Id, s.Position, s.ScheduledFor, s.Angle, s.Brief, s.Status, s.ContentItemId,
+                        s.Id, s.Position, s.ScheduledFor, s.Angle, s.Brief, s.HookType, s.Status, s.ContentItemId,
                         content = c is null ? null : new { c.Title, c.Status, c.ScheduledFor, approved = c.ApprovedVersion == c.CurrentVersion },
                         results = p is null ? null : new { p.PublishedAt, p.Url, p.MeasuredAt, p.Reactions, p.Comments, p.Shares, p.Views, p.Reach, p.Clicks, p.Note },
                     };
@@ -161,7 +164,7 @@ public static class PlanningModule
                 var ph = Placeholder.Match(d.Body);
                 if (ph.Success) return Results.Problem(statusCode: 422, title: $"The draft contains a placeholder ({ph.Value}) because the profile lacks that information. Add it to the product profile (for example the store link as a fact), approve the profile, then try again.");
 
-                var itemId = await content.CreateAsync(new NewContent(plan.ProductId, $"{plan.Name} · Post {slot.Position}: {slot.Angle}", plan.Channel, "Post", plan.Language, d.Body, d.DraftId), ct);
+                var itemId = await content.CreateAsync(new NewContent(plan.ProductId, $"{plan.Name} · Post {slot.Position}: {slot.Angle}", plan.Channel, "Post", plan.Language, d.Body, d.DraftId, null, slot.HookType), ct);
                 var submitted = await content.SubmitAsync(itemId, ct);
                 await db.Slots.Where(s => s.Id == slotId).ExecuteUpdateAsync(x => x.SetProperty(s => s.Status, SlotStatus.Drafted).SetProperty(s => s.ContentItemId, itemId).SetProperty(s => s.DraftedAt, clock.UtcNow), ct);
                 done = true;
@@ -257,4 +260,23 @@ public static class PlanningModule
 
         return app;
     }
+}
+
+/// <summary>What has worked so far, by format, hook type, weekday and time slot. Read-only; it is the same table the planner is given.</summary>
+public static class LeaderboardEndpoint
+{
+    public static async Task<LeaderboardResult> BuildAsync(IContentCatalog catalog, IPostPerformanceReader perf, IConfiguration cfg, Guid productId, string channel, CancellationToken ct)
+    {
+        var posts = await catalog.GetPublishedAsync(productId, channel, ct);
+        var figures = (await perf.GetAsync(posts.Select(p => p.ItemId).ToList(), ct)).ToDictionary(p => p.ContentItemId);
+        var rows = posts.Select(p => { figures.TryGetValue(p.ItemId, out var f); return new LeaderboardRow(p.ItemId, p.Format, p.HookType, p.PublishedAt, Leaderboard.Engagements(f), f?.Views); }).ToList();
+        return Leaderboard.Build(channel, cfg.GetValue("Planning:Leaderboard:UtcOffsetHours", 0), rows);
+    }
+
+    public static void Map(RouteGroupBuilder g)
+        => g.MapGet("/products/{productId:guid}/leaderboard", async (Guid productId, string? channel, ICurrentUser u, IContentCatalog catalog, IPostPerformanceReader perf, IConfiguration cfg, CancellationToken ct) =>
+        {
+            if (!u.HasPermission(Permissions.ProductsRead) || !await u.CanAccessProductAsync(productId, ct)) return Results.NotFound();
+            return Results.Ok(await BuildAsync(catalog, perf, cfg, productId, string.IsNullOrWhiteSpace(channel) ? "Facebook" : channel.Trim(), ct));
+        });
 }

@@ -185,6 +185,10 @@ namespace TriSoftic.GrowthEngine.Modules.Planning.Migrations
                     b.Property<DateTimeOffset?>("DraftedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("HookType")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid");
 

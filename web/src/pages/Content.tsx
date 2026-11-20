@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError, type AssetItem } from '../api.ts'
 import { useAuth } from '../auth.tsx'
 
-interface ItemSummary { id: string; productId: string; campaignId?: string; title: string; channel: string; format: string; language?: string; currentVersion: number; approvedVersion?: number; status: string; scheduledFor?: string }
+interface ItemSummary { id: string; productId: string; campaignId?: string; title: string; channel: string; format: string; hookType?: string | null; language?: string; currentVersion: number; approvedVersion?: number; status: string; scheduledFor?: string }
 interface ItemDetail { item: ItemSummary; current: { number: number; title: string; body: string; note?: string; sourceDraftId?: string; assetIds: string[]; media: { id: string; name: string; contentType: string; sizeBytes: number; isRetired: boolean }[] }; versions: { number: number; note?: string; approved: boolean; createdAt: string }[] }
 interface Campaign { id: string; name: string; objective: string; status: string; budgetUsd?: number; startDate?: string; endDate?: string; channels: string }
 
@@ -23,10 +23,11 @@ export function ContentTab({ productId }: { productId: string }) {
   const [open, setOpen] = useState<string | null>(null)
   const list = useQuery({ queryKey: ['content', productId], queryFn: () => api.get<ItemSummary[]>(`/api/v1/content?productId=${productId}`) })
   const formats = useQuery({ queryKey: ['formats'], queryFn: () => api.get<string[]>('/api/v1/content-formats') })
+  const hooks = useQuery({ queryKey: ['hook-types'], queryFn: () => api.get<string[]>('/api/v1/hook-types') })
   const campaigns = useQuery({ queryKey: ['campaigns', productId], queryFn: () => api.get<Campaign[]>(`/api/v1/products/${productId}/campaigns`) })
-  const [f, setF] = useState({ title: '', channel: 'facebook', format: 'Post', body: '', campaignId: '', assetIds: [] as string[] })
+  const [f, setF] = useState({ title: '', channel: 'facebook', format: 'Post', hookType: '', body: '', campaignId: '', assetIds: [] as string[] })
   const create = useMutation({
-    mutationFn: () => api.post<ItemSummary>(`/api/v1/products/${productId}/content`, { ...f, campaignId: f.campaignId || null }),
+    mutationFn: () => api.post<ItemSummary>(`/api/v1/products/${productId}/content`, { ...f, campaignId: f.campaignId || null, hookType: f.hookType || null }),
     onSuccess: (r) => { setF({ ...f, title: '', body: '', assetIds: [] }); setOpen(r.id); void qc.invalidateQueries({ queryKey: ['content'] }) },
   })
 
@@ -54,6 +55,7 @@ export function ContentTab({ productId }: { productId: string }) {
             <label>Title<input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required maxLength={300} /></label>
             <label>Channel<input value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value })} required /></label>
             <label>Format<select value={f.format} onChange={(e) => setF({ ...f, format: e.target.value })}>{formats.data?.map((x) => <option key={x}>{x}</option>)}</select></label>
+            <label>How it opens<select value={f.hookType} onChange={(e) => setF({ ...f, hookType: e.target.value })}><option value="">Not tagged</option>{hooks.data?.map((x) => <option key={x}>{x}</option>)}</select></label>
             <label>Campaign<select value={f.campaignId} onChange={(e) => setF({ ...f, campaignId: e.target.value })}><option value="">None</option>{campaigns.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
           </div>
           <label>Text<textarea rows={6} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} /></label>
@@ -89,6 +91,8 @@ function EditorBody({ d, onBack }: { d: ItemDetail; onBack: () => void }) {
   const unschedule = useItemAction(it.id, 'unschedule', refresh)
   const schedule = useMutation({ mutationFn: () => api.post(`/api/v1/content/${it.id}/schedule`, { at: new Date(at).toISOString() }), onSuccess: refresh })
   const canWrite = can('content.write') && it.status !== 'Cancelled'
+  const hooks = useQuery({ queryKey: ['hook-types'], queryFn: () => api.get<string[]>('/api/v1/hook-types') })
+  const setHook = useMutation({ mutationFn: (hookType: string) => api.put(`/api/v1/content/${it.id}/hook-type`, { hookType: hookType || null }), onSuccess: refresh })
   const dirty = title !== d.current.title || body !== d.current.body || assetIds.join() !== (d.current.assetIds ?? []).join()
   const error = save.error ?? submit.error ?? withdraw.error ?? cancel.error ?? schedule.error ?? unschedule.error
 
@@ -102,6 +106,11 @@ function EditorBody({ d, onBack }: { d: ItemDetail; onBack: () => void }) {
       {it.status === 'Publishing' && <p className="muted">Being published now. It can be edited once publishing finishes.</p>}
       {it.status === 'Published' && <p className="muted">Live. Editing creates a new version that needs approval before it can go out.</p>}
       {it.status === 'PublishFailed' && <p className="error">Publishing failed. See Publishing, Needs attention, to retry or record it by hand.</p>}
+      <p className="row" style={{ alignItems: 'flex-end', gap: 12 }}>
+        <label>How this post opens<select value={it.hookType ?? ''} disabled={!can('content.write')} onChange={(e) => setHook.mutate(e.target.value)}><option value="">Not tagged</option>{hooks.data?.map((x) => <option key={x}>{x}</option>)}</select></label>
+        <span className="muted">A label for the results leaderboard. Changing it does not need a new approval.</span>
+      </p>
+      {setHook.error && <p className="error" role="alert">{String((setHook.error as Error).message ?? setHook.error)}</p>}
       <form className="card" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate() }}>
         <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} disabled={!canWrite} /></label>
         <label>Text<textarea rows={12} value={body} onChange={(e) => setBody(e.target.value)} disabled={!canWrite} /></label>

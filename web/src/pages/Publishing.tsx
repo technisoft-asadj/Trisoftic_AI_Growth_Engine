@@ -211,6 +211,38 @@ const figureLabel: Record<string, { name: string; help: string }> = {
   page_reach: { name: 'Page reach', help: 'People who saw Page content that day' },
 }
 
+interface LbCell { key: string; posts: number; measured: number; avgEngagements: number | null; withViews: number; avgViews: number | null; tooFew: boolean }
+interface LbResult { channel: string; timeZoneLabel: string; minMeasured: number; published: number; measured: number; dimensions: { name: string; cells: LbCell[] }[] }
+
+/** What has worked so far, by format, hook type, weekday and time slot. A group with too few measured posts is shown but marked as not evidence. */
+function LeaderboardPanel({ pid }: { pid: string }) {
+  const q = useQuery({ queryKey: ['leaderboard', pid], queryFn: () => api.get<LbResult>(`/api/v1/products/${pid}/leaderboard`) })
+  const d = q.data
+  const n = (v: number | null) => (v === null ? '—' : String(v))
+  return (
+    <div className="card">
+      <h3>What works: results by format, hook, day and time</h3>
+      {q.isLoading && <p className="muted">Loading…</p>}
+      {d && d.published === 0 && <p className="muted">Nothing published yet. Once posts are live and Facebook reports their figures, they are grouped here. Tag how each post opens (in the content editor) so hook types can be compared.</p>}
+      {d && d.published > 0 && (
+        <>
+          <p className="muted">{d.published} published post(s), {d.measured} with engagement figures (reactions + comments + shares). Averages are per post; times are {d.timeZoneLabel}. A group with fewer than {d.minMeasured} measured posts is marked <b>too few</b>: it is a hint, not a finding. A dash means Facebook did not report the figure.</p>
+          <div className="row" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 24 }}>
+            {d.dimensions.map((dim) => (
+              <table key={dim.name} style={{ minWidth: 300 }}>
+                <thead><tr><th>{dim.name}</th><th>Posts</th><th>Avg engagements</th><th>Avg views</th><th /></tr></thead>
+                <tbody>{dim.cells.map((c) => (
+                  <tr key={c.key} style={c.tooFew ? { opacity: 0.65 } : undefined}><td>{c.key}</td><td>{c.posts}</td><td>{n(c.avgEngagements)}</td><td>{n(c.avgViews)}</td><td>{c.tooFew ? <span className="badge">too few</span> : null}</td></tr>
+                ))}</tbody>
+              </table>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 /** The Page's own figures from Facebook. A figure Facebook did not supply shows a dash and the reason, never a zero. */
 function PageHealth({ pid }: { pid: string }) {
   const qc = useQueryClient()
@@ -256,6 +288,7 @@ function Posts() {
     <>
       <div className="row">{select}</div>
       {pid && <PageHealth pid={pid} />}
+      {pid && <LeaderboardPanel pid={pid} />}
       {q.data?.length === 0 && <p className="muted">Nothing published yet.</p>}
       {!!q.data?.length && (
         <table>

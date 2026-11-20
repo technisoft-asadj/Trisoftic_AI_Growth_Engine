@@ -21,16 +21,18 @@ public static class ContentModule
         s.AddScoped<IApprovalSubjectHandler, ContentApprovalHandler>();
         s.AddScoped<IContentPublishSource, ContentPublishSource>();
         s.AddScoped<IContentPlanner, ContentPlanner>();
+        s.AddScoped<IContentCatalog, ContentCatalog>();
         return s;
     }
 
     public sealed record CampaignRequest(string Name, string? Objective, string? Audience, string? Market, string? Channels, string? DestinationUrl, string? TrackingNotes,
         decimal? BudgetUsd, DateOnly? StartDate, DateOnly? EndDate, string? SuccessThresholds);
-    public sealed record CreateContentRequest(string Title, string Channel, string? Format, string? Language, string Body, Guid? CampaignId, Guid? SourceDraftId, List<Guid>? AssetIds = null);
+    public sealed record CreateContentRequest(string Title, string Channel, string? Format, string? Language, string Body, Guid? CampaignId, Guid? SourceDraftId, List<Guid>? AssetIds = null, string? HookType = null);
+    public sealed record HookTypeRequest(string? HookType);
     public sealed record SaveVersionRequest(string? Title, string Body, string? Note, int BaseVersion, List<Guid>? AssetIds = null);
     public sealed record ScheduleRequest(DateTimeOffset At);
 
-    private static object Dto(ContentItem i) => new { i.Id, i.ProductId, i.CampaignId, i.Title, i.Channel, i.Format, i.Language, i.CurrentVersion, i.ApprovedVersion, i.Status, i.ScheduledFor, i.UpdatedAt };
+    private static object Dto(ContentItem i) => new { i.Id, i.ProductId, i.CampaignId, i.Title, i.Channel, i.Format, i.HookType, i.Language, i.CurrentVersion, i.ApprovedVersion, i.Status, i.ScheduledFor, i.UpdatedAt };
 
     private static async Task<ContentItem?> Load(ContentDbContext db, ICurrentUser u, Guid id, string? write, CancellationToken ct)
     {
@@ -58,6 +60,7 @@ public static class ContentModule
         MapCampaigns(g);
 
         g.MapGet("/content-formats", () => Results.Ok(Formats));
+        g.MapGet("/hook-types", () => Results.Ok(HookTypes.All));
 
         // ---- queue / calendar across the products the caller can see ----
         g.MapGet("/content", async (ContentDbContext db, ICurrentUser u, ContentStatus? status, Guid? productId, Guid? campaignId, int? take, CancellationToken ct) =>
@@ -90,6 +93,7 @@ public static class ContentModule
             if (string.IsNullOrWhiteSpace(req.Channel) || req.Channel.Length > 60) return Results.Problem(statusCode: 400, title: "A channel is required");
             var format = req.Format ?? "Post";
             if (!Formats.Contains(format)) return Results.Problem(statusCode: 400, title: "Unknown format");
+            if (!HookTypes.IsValid(req.HookType)) return Results.Problem(statusCode: 400, title: "Unknown hook type");
             var body = req.Body ?? "";
             if (body.Length > 60000) return Results.Problem(statusCode: 400, title: "The body is too long");
             if (req.CampaignId is { } cid && !await db.Campaigns.AnyAsync(c => c.Id == cid && c.ProductId == productId, ct)) return Results.Problem(statusCode: 400, title: "Campaign not found for this product");
@@ -107,12 +111,25 @@ public static class ContentModule
             }
 
             var now = clock.UtcNow;
-            var item = new ContentItem { ProductId = productId, CampaignId = req.CampaignId, Title = req.Title.Trim(), Channel = req.Channel.Trim(), Format = format, Language = req.Language, CurrentVersion = 1, CreatedBy = u.UserId, CreatedAt = now, UpdatedAt = now };
+            var item = new ContentItem { ProductId = productId, CampaignId = req.CampaignId, Title = req.Title.Trim(), Channel = req.Channel.Trim(), Format = format, HookType = req.HookType, Language = req.Language, CurrentVersion = 1, CreatedBy = u.UserId, CreatedAt = now, UpdatedAt = now };
             db.Items.Add(item);
             db.Versions.Add(new ContentVersion { ContentItemId = item.Id, Number = 1, Title = item.Title, Body = body, Note = source is null ? "Created" : "Created from AI draft", SourceDraftId = source, AssetIdsJson = ContentVersion.ToJson(mediaIds), CreatedBy = u.UserId, CreatedAt = now });
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry("content.created", "ContentItem", item.Id.ToString(), productId, item.Title, After: new { item.Channel, item.Format, SourceDraftId = source }), ct);
             return Results.Created($"/api/v1/content/{item.Id}", Dto(item));
+        });
+
+        // The tags are labels for comparing results, not part of the approved text: they may be set or corrected at any time, and every change is audited.
+        g.MapPut("/content/{id:guid}/hook-type", async (Guid id, HookTypeRequest req, ContentDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        {
+            var i = await Load(db, u, id, Permissions.ContentWrite, ct);
+            if (i is null) return Results.NotFound();
+            var value = string.IsNullOrWhiteSpace(req.HookType) ? null : req.HookType.Trim();
+            if (!HookTypes.IsValid(value)) return Results.Problem(statusCode: 400, title: "Unknown hook type");
+            var before = i.HookType; i.HookType = value; i.UpdatedAt = clock.UtcNow;
+            await db.SaveChangesAsync(ct);
+            await audit.WriteAsync(new AuditEntry("content.hook-type", "ContentItem", id.ToString(), i.ProductId, i.Title, Before: new { hookType = before }, After: new { hookType = value }), ct);
+            return Results.Ok(Dto(i));
         });
 
         g.MapGet("/content/{id:guid}", async (Guid id, ContentDbContext db, ICurrentUser u, IAssetCatalog assets, CancellationToken ct) =>

@@ -13,6 +13,8 @@ public sealed class PlanningTests(TestHost host)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static string Uniq() => Guid.NewGuid().ToString("N")[..8];
+    /// <summary>Letters only, so an angle never contains a number the planner could be accused of inventing.</summary>
+    private static string Letters() => new(Uniq().Select(c => (char)('a' + Convert.ToInt32(c.ToString(), 16))).ToArray());
     private FakeClock Clock => host.Services.GetRequiredService<FakeClock>();
 
     private async Task<HttpClient> UserAsync(HttpClient admin, string role)
@@ -49,11 +51,11 @@ public sealed class PlanningTests(TestHost host)
         return pid;
     }
 
-    private static string PlanJson(int n) => JsonSerializer.Serialize(new
+    private static string PlanJson(int n, string rationale = "A short run that introduces the product, then shows how it works offline.") => JsonSerializer.Serialize(new
     {
-        rationale = "A short run that introduces the product, then shows how it works offline.",
+        rationale,
         measures = new[] { new { name = "Reactions and comments", why = "shows interest" }, new { name = "Link clicks", why = "shows intent" } },
-        slots = Enumerable.Range(1, n).Select(i => new { angle = $"Angle {i} " + Uniq(), brief = "Cover a verified fact." }),
+        slots = Enumerable.Range(1, n).Select(i => new { angle = $"Angle {i} " + Letters(), brief = "Cover a verified fact.", hookType = HookTypes.All[(i - 1) % HookTypes.All.Length] }),
     });
 
     private const string Post = """{"title":"Offline","body":"Our pharmacy POS works offline.","claims":[{"text":"Works offline","factRef":"f-offline","assumption":false}],"questions":[]}""";
@@ -164,6 +166,67 @@ public sealed class PlanningTests(TestHost host)
         Assert.Contains("WHAT THE PREVIOUS PLAN TAUGHT US", prompt); Assert.Contains("Ask followers a question", prompt); Assert.Contains("Only 3 posts; treat as a hint, not proof", prompt);
         var nextId = (await next.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
         Assert.Equal(planId, (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/plans/{nextId}", Json)).GetProperty("previousPlanId").GetGuid());
+    }
+
+    [Fact]
+    public async Task Hook_type_tags_flow_into_a_leaderboard_and_the_planner_may_only_quote_figures_from_it()
+    {
+        var before = Clock.UtcNow;
+        try
+        {
+            var admin = await host.LoginAdminAsync(); var approver = await UserAsync(admin, "Approver");
+            var pid = await ProductAsync(admin, approver);
+
+            // a plan's slots carry hook types, and the drafted post carries its slot's tag
+            Script(PlanJson(3));
+            var planId = (await (await admin.PostAsJsonAsync($"/api/v1/products/{pid}/plans", NewPlan(Clock.UtcNow))).Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+            var slots = (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/plans/{planId}", Json)).GetProperty("slots").EnumerateArray().ToList();
+            Assert.Equal(new[] { "Question", "Challenge", "Scenario" }, slots.Select(s => s.GetProperty("hookType").GetString()).ToArray());
+            Script(Post, Post, Post);
+            foreach (var s in slots) (await admin.PostAsync($"/api/v1/plans/{planId}/slots/{s.GetProperty("id").GetGuid()}/draft", null)).EnsureSuccessStatusCode();
+            var itemIds = (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/plans/{planId}", Json)).GetProperty("slots").EnumerateArray().Select(s => s.GetProperty("contentItemId").GetGuid()).ToList();
+            Assert.Equal("Question", (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/content/{itemIds[0]}", Json)).GetProperty("item").GetProperty("hookType").GetString());
+
+            // a tag can be corrected, but only to a name from the fixed list
+            Assert.Equal(HttpStatusCode.BadRequest, (await admin.PutAsJsonAsync($"/api/v1/content/{itemIds[2]}/hook-type", new { hookType = "Clickbait" })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync($"/api/v1/content/{itemIds[2]}/hook-type", new { hookType = "Tip" })).StatusCode);
+
+            // before anything is published the leaderboard is empty and the planner is given none
+            var empty = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/products/{pid}/leaderboard", Json);
+            Assert.Equal(0, empty.GetProperty("published").GetInt32());
+
+            foreach (var id in itemIds) await Approve(admin, approver, id.ToString());
+            (await admin.PostAsync($"/api/v1/plans/{planId}/schedule", null)).EnsureSuccessStatusCode();
+            Clock.Advance(TimeSpan.FromDays(6));
+            await RunJobs("publishing.dispatch");
+            ScriptedPublisher.PostFigures = new(Reactions: 12, Comments: 3, Shares: 0, Views: null, Reach: null, Clicks: null, Note: null);
+            try { await RunJobs("publishing.pull-post-metrics"); } finally { ScriptedPublisher.PostFigures = null; }
+
+            var lb = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/products/{pid}/leaderboard", Json);
+            Assert.Equal(3, lb.GetProperty("published").GetInt32()); Assert.Equal(3, lb.GetProperty("measured").GetInt32());
+            JsonElement Cell(string dim, string key) => lb.GetProperty("dimensions").EnumerateArray().Single(d => d.GetProperty("name").GetString() == dim).GetProperty("cells").EnumerateArray().Single(c => c.GetProperty("key").GetString() == key);
+            var post = Cell("Format", "Post");
+            Assert.Equal(3, post.GetProperty("posts").GetInt32()); Assert.Equal(15m, post.GetProperty("avgEngagements").GetDecimal());
+            Assert.True(post.GetProperty("tooFew").GetBoolean());                                        // 3 measured posts is under the minimum of 5
+            Assert.Equal(JsonValueKind.Null, post.GetProperty("avgViews").ValueKind);                    // views were not reported: null, never 0
+            Assert.Equal(1, Cell("Hook type", "Tip").GetProperty("posts").GetInt32());                   // the corrected tag, not the planned one
+
+            // the planner is given the table and must quote only figures from it; an invented figure sends it back once
+            Script(PlanJson(3, "Tip posts averaged 99 engagements, so use more of them."), PlanJson(3, "Posts so far averaged 15 engagements, but 3 posts is too few to rely on."));
+            FakeAiProvider.Prompts.Clear();
+            var next = await admin.PostAsJsonAsync($"/api/v1/products/{pid}/plans", NewPlan(Clock.UtcNow));
+            Assert.Equal(HttpStatusCode.Created, next.StatusCode);
+            Assert.Equal(2, FakeAiProvider.Prompts.Count);
+            Assert.Contains("LEADERBOARD", FakeAiProvider.Prompts[0]); Assert.Contains("TOO FEW", FakeAiProvider.Prompts[0]);
+            Assert.Contains("not in the leaderboard", FakeAiProvider.Prompts[1], StringComparison.OrdinalIgnoreCase);
+
+            // a planner that keeps inventing figures is refused, and no plan is saved
+            Script(PlanJson(3, "Tips averaged 99 engagements."), PlanJson(3, "Tips averaged 99 engagements."));
+            var refused = await admin.PostAsJsonAsync($"/api/v1/products/{pid}/plans", NewPlan(Clock.UtcNow));
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+            Assert.Contains("99", await refused.Content.ReadAsStringAsync());
+        }
+        finally { Clock.Set(before); }
     }
 
     [Fact]
