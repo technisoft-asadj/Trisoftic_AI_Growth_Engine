@@ -154,3 +154,17 @@ public sealed class FakeEmailProvider : TriSoftic.GrowthEngine.Modules.Messaging
     public Task<string> SendAsync(TriSoftic.GrowthEngine.Modules.Messaging.OutgoingEmail message, CancellationToken ct) { Sent.Enqueue(message); return Task.FromResult("msg-" + Guid.NewGuid().ToString("N")[..8]); }
     public static List<TriSoftic.GrowthEngine.Modules.Messaging.OutgoingEmail> To(string address) => Sent.Where(m => m.To.Equals(address, StringComparison.OrdinalIgnoreCase)).ToList();
 }
+
+/// <summary>Serves a scripted page instead of reaching the internet.</summary>
+public sealed class FakePageFetcher : TriSoftic.GrowthEngine.Modules.Portfolio.IPageFetcher
+{
+    public static TriSoftic.GrowthEngine.Modules.Portfolio.FetchedPage? Page;
+    public static string? FailWith;
+    public static readonly List<string> Requested = [];
+    public Task<TriSoftic.GrowthEngine.Modules.Portfolio.FetchedPage> FetchAsync(string url, CancellationToken ct)
+    {
+        Requested.Add(url);
+        if (FailWith is not null) throw new TriSoftic.GrowthEngine.Modules.Portfolio.PageFetchException(FailWith);
+        return Task.FromResult(Page ?? throw new InvalidOperationException("No page scripted"));
+    }
+}

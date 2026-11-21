@@ -25,6 +25,7 @@ public static partial class PortfolioEndpoints
     public static IEndpointRouteBuilder MapPortfolioEndpoints(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/v1").RequireAuthorization().WithTags("Portfolio");
+        ProfileImportEndpoints.Map(g);
 
         g.MapGet("/product-categories", async (PortfolioDbContext db, ICurrentUser u, CancellationToken ct) =>
             u.HasPermission(Permissions.ProductsRead)

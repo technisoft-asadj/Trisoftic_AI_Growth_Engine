@@ -114,6 +114,8 @@ function ProfileView({ profile }: { profile: Profile }) {
   )
 }
 
+interface ImportOutcome { profile: Profile; added: { facts: number; personas: number; markets: number; platforms: number }; dropped: number; notes: string[]; source: { url: string; title: string }; costUsd: number }
+
 function ProfileEditor({ productId, version, onSaved }: { productId: string; version: ProfileVersion; onSaved: () => void }) {
   const [p, setP] = useState<Profile>({ ...emptyProfile(), ...version.content })
   const [note, setNote] = useState(version.changeNote ?? '')
@@ -121,11 +123,35 @@ function ProfileEditor({ productId, version, onSaved }: { productId: string; ver
     mutationFn: () => api.put(`/api/v1/products/${productId}/profile/versions/${version.number}`, { content: p, changeNote: note }),
     onSuccess: onSaved,
   })
+  const { can } = useAuth()
+  const [pageUrl, setPageUrl] = useState('')
+  const [imported, setImported] = useState<ImportOutcome | null>(null)
+  const importPage = useMutation({
+    mutationFn: () => api.post<ImportOutcome>(`/api/v1/products/${productId}/profile/import-url`, { url: pageUrl, current: p }),
+    onSuccess: (r) => { setP({ ...emptyProfile(), ...r.profile }); setImported(r) },
+  })
   const setFact = (i: number, patch: Partial<Fact>) => setP({ ...p, facts: p.facts.map((f, j) => (j === i ? { ...f, ...patch } : f)) })
   const setClaim = (i: number, patch: Partial<Claim>) => setP({ ...p, claims: p.claims.map((c, j) => (j === i ? { ...c, ...patch } : c)) })
 
   return (
     <form className="card" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate() }}>
+      {can('ai.generate') && (
+        <div className="card">
+          <h3>Fill from a web page</h3>
+          <p className="muted">Paste the address of a page about this product (its website or store page). The AI reads it and adds facts, markets, platforms and more. Only what the page really says is added, each fact carries the sentence it came from, and nothing is marked verified: check each fact, tick it, then save.</p>
+          <div className="row">
+            <input style={{ flex: 1 }} type="url" placeholder="https://..." value={pageUrl} onChange={(e) => setPageUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (pageUrl.trim().length >= 8 && !importPage.isPending) importPage.mutate() } }} />
+            <button type="button" className="secondary" disabled={importPage.isPending || pageUrl.trim().length < 8} onClick={() => importPage.mutate()}>{importPage.isPending ? 'Reading… (up to a minute)' : 'Read page'}</button>
+          </div>
+          <ErrorBox error={importPage.error} />
+          {imported && (
+            <p className="muted">
+              Added {imported.added.facts} fact(s), {imported.added.personas} audience(s), {imported.added.markets} market(s) and {imported.added.platforms} platform(s) from {imported.source.title || imported.source.url}.
+              {imported.dropped > 0 && ` ${imported.dropped} suggestion(s) were left out because the page did not back them up.`} {imported.notes.join(' ')} Review below, then press Save draft. Cost ≈ ${imported.costUsd.toFixed(3)}.
+            </p>
+          )}
+        </div>
+      )}
       <label>Summary<textarea rows={3} value={p.summary} onChange={(e) => setP({ ...p, summary: e.target.value })} /></label>
 
       <h3>Verified facts</h3>

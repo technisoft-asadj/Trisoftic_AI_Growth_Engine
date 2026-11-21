@@ -61,6 +61,8 @@ public sealed class TestHost : WebApplicationFactory<Program>, IAsyncLifetime
             s.AddSingleton<IAiProvider, FakeAiProvider>();
             s.RemoveAll<IImageProvider>();
             s.AddSingleton<IImageProvider, FakeImageProvider>();
+            s.RemoveAll<TriSoftic.GrowthEngine.Modules.Portfolio.IPageFetcher>();
+            s.AddSingleton<TriSoftic.GrowthEngine.Modules.Portfolio.IPageFetcher, FakePageFetcher>();
         });
     }
 
