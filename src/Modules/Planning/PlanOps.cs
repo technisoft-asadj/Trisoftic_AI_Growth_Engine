@@ -29,7 +29,7 @@ public sealed record ScheduleOutcome(int Scheduled, IReadOnlyList<(int Position,
 /// Permission checks belong to the caller.
 /// </summary>
 public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, IAiGenerator ai, IContentCatalog catalog, IPostPerformanceReader perf, IConfiguration cfg,
-    IContentDrafter drafter, IContentPlanner content, HookTestService tests, IAssetCatalog assets, IImageMaker maker, IClock clock, IAuditWriter audit)
+    IContentDrafter drafter, IContentPlanner content, HookTestService tests, LearningService register, IAssetCatalog assets, IImageMaker maker, IClock clock, IAuditWriter audit)
 {
     private static readonly Regex Placeholder = new(@"\[[^\]\r\n]{2,60}\]", RegexOptions.Compiled);
     private const int AiAttempts = 2;
@@ -64,7 +64,8 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
         var slotCount = PlanLogic.SlotCount(spec.Days, spec.EveryDays);
         var table = await LeaderboardEndpoint.BuildAsync(catalog, perf, cfg, productId, spec.Channel, ct);
         var testLines = await tests.ConcludedSummariesAsync(productId, ct);
-        var system = PlanLogic.BuildPlanSystem(k, slotCount, visuals); var user = PlanLogic.BuildPlanUser(spec, slotCount, learnings, table.IsEmpty ? null : Leaderboard.ForPrompt(table));
+        var open = await register.OpenAsync(productId, ct);
+        var system = PlanLogic.BuildPlanSystem(k, slotCount, visuals, open); var user = PlanLogic.BuildPlanUser(spec, slotCount, learnings, table.IsEmpty ? null : Leaderboard.ForPrompt(table));
         if (testLines.Count > 0) user += "\n\nHOOK TEST RESULTS (small samples: indications, not proof; \"no clear winner\" means the hook types performed alike). You may quote these figures:\n- " + string.Join("\n- ", testLines) + "\n";
         PlanDraft? draft = null; AiResult? last = null; decimal cost = 0; List<string> violations = [];
         try
@@ -75,7 +76,7 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
                 last = await ai.GenerateAsync(new AiRequest("plan.generate", AiTier.Strategy, system, prompt, productId, "plan.generate", 1, MaxTokens: 8000), ct);
                 cost += last.EstimatedCostUsd;
                 var parsed = PlanLogic.ParsePlan(last.Text, out var parseError);
-                violations = parsed is null ? [parseError!] : PlanLogic.ValidatePlan(parsed, slotCount, table, k.Facts.Select(f => f.Text).Concat(k.Claims.Select(c => c.Text)).Append(k.Summary).Concat(testLines), visuals, maker.CheckBrief);
+                violations = parsed is null ? [parseError!] : PlanLogic.ValidatePlan(parsed, slotCount, table, k.Facts.Select(f => f.Text).Concat(k.Claims.Select(c => c.Text)).Append(k.Summary).Concat(testLines).Concat(open.SelectMany(h => new[] { h.Statement, h.HowToTest, h.Evidence })), visuals, maker.CheckBrief, open.Select(h => h.Id).ToList());
                 if (violations.Count == 0) draft = parsed;
             }
         }
@@ -92,8 +93,9 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
         var times = PlanLogic.SlotTimes(spec);
         db.Plans.Add(plan);
         for (var i = 0; i < times.Count; i++)
-            db.Slots.Add(new PlanSlot { PlanId = plan.Id, Position = i + 1, ScheduledFor = times[i], Angle = draft.Slots[i].Angle.Trim(), Brief = draft.Slots[i].Brief.Trim(), HookType = draft.Slots[i].HookType, Status = SlotStatus.Planned, Visual = visuals is null ? null : draft.Slots[i].Visual, ImageBrief = visuals is not null && draft.Slots[i].Visual == "image" ? draft.Slots[i].ImageBrief?.Trim() : null });
+            db.Slots.Add(new PlanSlot { PlanId = plan.Id, Position = i + 1, ScheduledFor = times[i], Angle = draft.Slots[i].Angle.Trim(), Brief = draft.Slots[i].Brief.Trim(), HookType = draft.Slots[i].HookType, Status = SlotStatus.Planned, Visual = visuals is null ? null : draft.Slots[i].Visual, ImageBrief = visuals is not null && draft.Slots[i].Visual == "image" ? draft.Slots[i].ImageBrief?.Trim() : null, HypothesisId = open.Any(h => h.Id.ToString() == draft.Slots[i].Tests) ? Guid.Parse(draft.Slots[i].Tests!) : null });
         await db.SaveChangesAsync(ct);
+        await register.MarkTestedAsync(plan.Id, [.. draft.Slots.Select(s => Guid.TryParse(s.Tests, out var g) ? g : Guid.Empty).Where(g => g != Guid.Empty && open.Any(h => h.Id == g)).Distinct()], ct);
         await audit.WriteAsync(new AuditEntry("plan.created", "GrowthPlan", plan.Id.ToString(), productId, plan.Name, After: new { plan.Days, slots = times.Count, plan.Channel, plan.Provider, plan.Model, plan.CostUsd, fromReview = from?.Id, managed }), ct);
         return Op<Guid>.Of(plan.Id);
     }
@@ -241,12 +243,14 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
         }).ToList();
         var q = PlanLogic.Quality(figures);
         var measures = JsonSerializer.Deserialize<List<Measure>>(plan.MeasuresJson, PlanLogic.Json) ?? [];
+        var openH = await register.OpenAsync(plan.ProductId, ct);
+        var openIds = openH.Select(h => h.Id).ToList();
 
         ReviewResult? result; string provider = "none", model = ""; decimal cost = 0;
         if (q.Measured == 0) result = PlanLogic.NotEnoughData(q);
         else
         {
-            result = null; var system = PlanLogic.BuildReviewSystem(); var user = PlanLogic.BuildReviewUser(plan, measures, figures, q); List<string> violations = [];
+            result = null; var system = PlanLogic.BuildReviewSystem(withHypotheses: true); var user = PlanLogic.BuildReviewUser(plan, measures, figures, q, openH); List<string> violations = [];
             try
             {
                 for (var attempt = 1; attempt <= AiAttempts && result is null; attempt++)
@@ -255,7 +259,7 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
                     var r = await ai.GenerateAsync(new AiRequest("plan.review", AiTier.Strategy, system, prompt, plan.ProductId, "plan.review", 1, MaxTokens: 6000), ct);
                     cost += r.EstimatedCostUsd; provider = r.Provider; model = r.Model;
                     var parsed = PlanLogic.ParseReview(r.Text, out var err);
-                    violations = parsed is null ? [err!] : PlanLogic.ValidateReview(parsed, figures, q);
+                    violations = parsed is null ? [err!] : PlanLogic.ValidateReview(parsed, figures, q, openIds);
                     if (violations.Count == 0) result = parsed;
                 }
             }
@@ -270,6 +274,7 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
         };
         db.Reviews.Add(review);
         await db.SaveChangesAsync(ct);
+        await register.ApplyReviewAsync(plan.ProductId, review.Id, result, ct);
         await audit.WriteAsync(new AuditEntry("plan.reviewed", "GrowthPlan", planId.ToString(), plan.ProductId, plan.Name, After: new { reviewId = review.Id, q.Published, q.Measured, result.Confidence, cost }), ct);
         return Op<Guid>.Of(review.Id);
     }

@@ -9,7 +9,7 @@ namespace TriSoftic.GrowthEngine.Modules.Planning;
 public sealed record PlanSpec(string Name, string Goal, string Channel, string? Language, DateOnly StartDate, int Days, int EveryDays, TimeOnly TimeUtc);
 
 public sealed class Measure { public string Name { get; set; } = ""; public string Why { get; set; } = ""; }
-public sealed class PlannedPost { public string Angle { get; set; } = ""; public string Brief { get; set; } = ""; public string? HookType { get; set; } public string? Visual { get; set; } public string? ImageBrief { get; set; } }
+public sealed class PlannedPost { public string Angle { get; set; } = ""; public string Brief { get; set; } = ""; public string? HookType { get; set; } public string? Visual { get; set; } public string? ImageBrief { get; set; } public string? Tests { get; set; } }
 
 /// <summary>What the planner may use for pictures and video in this plan.</summary>
 public sealed record VisualOptions(bool Images, int VideosAvailable);
@@ -30,6 +30,11 @@ public sealed record SlotFigures(int Position, string Angle, DateTimeOffset? Pub
 
 public sealed record DataQuality(int Slots, int Published, int Measured, int WithViews);
 
+/// <summary>An open hypothesis, as shown to the reviewer and the planner.</summary>
+public sealed record OpenHypothesis(Guid Id, string Statement, string? HowToTest, int TimesTested, string? Evidence);
+public sealed class NewHypothesis { public string Statement { get; set; } = ""; public string HowToTest { get; set; } = ""; }
+public sealed class HypothesisUpdate { public Guid Id { get; set; } public string Outcome { get; set; } = ""; public string Evidence { get; set; } = ""; }
+
 public sealed class NextAngle { public string Angle { get; set; } = ""; public string Why { get; set; } = ""; }
 public sealed class NextPlan { public string Goal { get; set; } = ""; public List<NextAngle> SuggestedAngles { get; set; } = []; }
 public sealed class ReviewResult
@@ -42,6 +47,10 @@ public sealed class ReviewResult
     public List<string> Learnings { get; set; } = [];
     public NextPlan NextPlan { get; set; } = new();
     public List<string> Caveats { get; set; } = [];
+    /// <summary>New hypotheses worth testing next (at most 3).</summary>
+    public List<NewHypothesis> Hypotheses { get; set; } = [];
+    /// <summary>Verdicts on the open hypotheses this review had figures for.</summary>
+    public List<HypothesisUpdate> Updates { get; set; } = [];
 }
 
 public static class PlanLogic
@@ -74,7 +83,7 @@ public static class PlanLogic
 
     // ---------- planning ----------
 
-    public static string BuildPlanSystem(ApprovedKnowledge k, int slots, VisualOptions? visuals = null)
+    public static string BuildPlanSystem(ApprovedKnowledge k, int slots, VisualOptions? visuals = null, IReadOnlyList<OpenHypothesis>? open = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"You are the growth planner for the product \"{k.ProductName}\" ({k.Kind}, {k.Lifecycle}).");
@@ -97,6 +106,12 @@ public static class PlanLogic
                 ? "   For \"image\" also give \"imageBrief\": ONE sentence describing a flat cartoon-style scene that illustrates the post. It must contain NO people, faces, crowds or hands, NO phone or game screens, gameplay or app interface, NO logos, text, words or numbers. Only objects and scenes (for example a dice rolling across a colourful board, a trophy on a podium made of game pieces)."
                 : "   Pictures are switched off, so never use \"image\".");
         }
+        if (open is { Count: > 0 })
+        {
+            var need = Math.Min(Math.Min(open.Count, 3), slots);
+            sb.AppendLine($"8. OPEN HYPOTHESES from earlier reviews (each still needs evidence). Give a slot \"tests\": the id of the hypothesis it is designed to test, or null. Across the plan, test at least {need} different open hypothesis(es), each with a post built so the results can answer it. Never invent a hypothesis id.");
+            foreach (var h in open) sb.AppendLine($"   - {h.Id}: {h.Statement}{(string.IsNullOrWhiteSpace(h.HowToTest) ? "" : $" (how to test: {h.HowToTest})")}{(h.TimesTested > 0 ? $" [tested {h.TimesTested}x so far{(string.IsNullOrWhiteSpace(h.Evidence) ? "" : "; last result: " + h.Evidence)}]" : "")}");
+        }
         sb.AppendLine();
         sb.AppendLine("PRODUCT SUMMARY: " + k.Summary);
         sb.AppendLine("PLATFORMS: " + (k.Platforms.Count == 0 ? "(not specified)" : string.Join(", ", k.Platforms)));
@@ -109,7 +124,7 @@ public static class PlanLogic
         foreach (var c in k.Claims.Where(c => c.Prohibited)) sb.AppendLine($"- {c.Text}");
         sb.AppendLine($"BRAND VOICE: tone={k.Tone ?? "(unspecified)"}; do: {string.Join("; ", k.Dos)}; don't: {string.Join("; ", k.Donts)}");
         sb.AppendLine();
-        sb.AppendLine("Respond with ONE JSON object and nothing else: {\"rationale\": string, \"measures\": [{\"name\": string, \"why\": string}], \"slots\": [{\"angle\": string, \"brief\": string, \"hookType\": string, \"visual\": string (only when visuals are allowed), \"imageBrief\": string (only for image)}]}");
+        sb.AppendLine("Respond with ONE JSON object and nothing else: {\"rationale\": string, \"measures\": [{\"name\": string, \"why\": string}], \"slots\": [{\"angle\": string, \"brief\": string, \"hookType\": string, \"visual\": string (only when visuals are allowed), \"imageBrief\": string (only for image), \"tests\": string or null (a hypothesis id, only when hypotheses are listed)}]}");
         return sb.ToString();
     }
 
@@ -143,9 +158,16 @@ public static class PlanLogic
         catch (JsonException ex) { error = "The answer was not valid JSON: " + ex.Message; return null; }
     }
 
-    public static List<string> ValidatePlan(PlanDraft d, int expectedSlots, LeaderboardResult? table = null, IEnumerable<string?>? profileTexts = null, VisualOptions? visuals = null, Func<string, string?>? checkBrief = null)
+    public static List<string> ValidatePlan(PlanDraft d, int expectedSlots, LeaderboardResult? table = null, IEnumerable<string?>? profileTexts = null, VisualOptions? visuals = null, Func<string, string?>? checkBrief = null, IReadOnlyList<Guid>? openHypotheses = null)
     {
         var v = new List<string>();
+        if (openHypotheses is { Count: > 0 })
+        {
+            var tested = d.Slots.Select(s => Guid.TryParse(s.Tests, out var g) ? g : (Guid?)null).ToList();
+            if (d.Slots.Any(s => !string.IsNullOrWhiteSpace(s.Tests) && !(Guid.TryParse(s.Tests, out var g) && openHypotheses.Contains(g)))) v.Add("\"tests\" must be the id of one of the open hypotheses, or null.");
+            var need = Math.Min(Math.Min(openHypotheses.Count, 3), expectedSlots);
+            if (tested.Where(t => t is not null && openHypotheses.Contains(t.Value)).Distinct().Count() < need) v.Add($"Test at least {need} different open hypothesis(es): give a slot \"tests\" with the hypothesis id.");
+        }
         if (visuals is not null)
         {
             if (d.Slots.Any(s => s.Visual is not ("text" or "image" or "video"))) v.Add("Every slot needs a visual: text, image or video.");
@@ -177,7 +199,7 @@ public static class PlanLogic
 
     private static string Cell(object? v) => v is null ? "not reported" : Convert.ToString(v, CultureInfo.InvariantCulture)!;
 
-    public static string BuildReviewSystem()
+    public static string BuildReviewSystem(bool withHypotheses = false)
     {
         var sb = new StringBuilder();
         sb.AppendLine("You review how a short social-media plan performed and advise on the next one. You are given the plan's goal, each post's angle, and the figures the social network reported.");
@@ -189,12 +211,17 @@ public static class PlanLogic
         sb.AppendLine("4. Set \"confidence\" honestly: \"low\" when fewer than 5 posts have engagement figures or views/reach are mostly missing; \"medium\" or \"high\" only with clearly sufficient, consistent data.");
         sb.AppendLine("5. If the data cannot support a conclusion, say so in \"caveats\" and propose an experiment to settle it instead of a conclusion.");
         sb.AppendLine("6. \"nextPlan\": a goal for the next plan and suggested angles, each with why. They must be grounded in what the posts showed or, with thin evidence, be explicit experiments.");
+        if (withHypotheses)
+        {
+            sb.AppendLine("7. \"updates\": for each OPEN HYPOTHESIS you were given and that these figures can speak to, give {\"id\", \"outcome\": \"supported\"|\"contradicted\"|\"inconclusive\", \"evidence\": one or two sentences quoting only given figures}. Use \"supported\" or \"contradicted\" ONLY when at least 5 posts have engagement figures and the figures clearly point one way; otherwise \"inconclusive\". Skip a hypothesis the figures say nothing about. Never invent an id.");
+            sb.AppendLine("8. \"hypotheses\": up to 3 NEW testable hypotheses suggested by what the posts showed (not duplicates of the open ones), each {\"statement\": one sentence, \"howToTest\": how the next plan can test it}. They are guesses to test, not conclusions.");
+        }
         sb.AppendLine();
-        sb.AppendLine("Respond with ONE JSON object and nothing else: {\"headline\": string, \"confidence\": \"low\"|\"medium\"|\"high\", \"whatWorked\": [string], \"whatDidNot\": [string], \"learnings\": [string], \"nextPlan\": {\"goal\": string, \"suggestedAngles\": [{\"angle\": string, \"why\": string}]}, \"caveats\": [string]}");
+        sb.AppendLine("Respond with ONE JSON object and nothing else: {\"headline\": string, \"confidence\": \"low\"|\"medium\"|\"high\", \"whatWorked\": [string], \"whatDidNot\": [string], \"learnings\": [string], \"nextPlan\": {\"goal\": string, \"suggestedAngles\": [{\"angle\": string, \"why\": string}]}, \"caveats\": [string]" + (withHypotheses ? ", \"updates\": [{\"id\": string, \"outcome\": string, \"evidence\": string}], \"hypotheses\": [{\"statement\": string, \"howToTest\": string}]" : "") + "}");
         return sb.ToString();
     }
 
-    public static string BuildReviewUser(GrowthPlan plan, IReadOnlyList<Measure> measures, IReadOnlyList<SlotFigures> figures, DataQuality q)
+    public static string BuildReviewUser(GrowthPlan plan, IReadOnlyList<Measure> measures, IReadOnlyList<SlotFigures> figures, DataQuality q, IReadOnlyList<OpenHypothesis>? open = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Plan: {plan.Name}");
@@ -206,6 +233,12 @@ public static class PlanLogic
         sb.AppendLine("Post | Angle | Published | Reactions | Comments | Shares | Engagements (sum) | Views | Reach | Link clicks");
         foreach (var f in figures)
             sb.AppendLine($"{f.Position} | {f.Angle} | {(f.PublishedAt is null ? "not published" : f.PublishedAt.Value.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture))} | {Cell(f.Reactions)} | {Cell(f.Comments)} | {Cell(f.Shares)} | {Cell(f.Engagements)} | {Cell(f.Views)} | {Cell(f.Reach)} | {Cell(f.Clicks)}");
+        if (open is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("OPEN HYPOTHESES (judge each only from the figures above; skip any the figures do not speak to):");
+            foreach (var h in open) sb.AppendLine($"- {h.Id}: {h.Statement}{(h.TimesTested > 0 ? $" [tested {h.TimesTested}x before]" : "")}");
+        }
         return sb.ToString();
     }
 
@@ -219,12 +252,19 @@ public static class PlanLogic
 
     private static IEnumerable<string> Texts(ReviewResult r)
         => new[] { r.Headline }.Concat(r.WhatWorked).Concat(r.WhatDidNot).Concat(r.Learnings).Concat(r.Caveats).Append(r.NextPlan.Goal)
-            .Concat(r.NextPlan.SuggestedAngles.SelectMany(a => new[] { a.Angle, a.Why }));
+            .Concat(r.NextPlan.SuggestedAngles.SelectMany(a => new[] { a.Angle, a.Why }))
+            .Concat(r.Hypotheses.SelectMany(h => new[] { h.Statement, h.HowToTest })).Concat(r.Updates.Select(u => u.Evidence));
 
     /// <summary>Every figure the review quotes must be one it was given. Small whole numbers (post numbers, day counts) are allowed.</summary>
-    public static List<string> ValidateReview(ReviewResult r, IReadOnlyList<SlotFigures> figures, DataQuality q)
+    public static List<string> ValidateReview(ReviewResult r, IReadOnlyList<SlotFigures> figures, DataQuality q, IReadOnlyCollection<Guid>? openIds = null)
     {
         var v = new List<string>();
+        if (r.Hypotheses.Count > 3) v.Add("Give at most 3 new hypotheses.");
+        if (r.Hypotheses.Any(h => string.IsNullOrWhiteSpace(h.Statement) || h.Statement.Length > 300 || h.HowToTest.Length > 500)) v.Add("Every hypothesis needs a statement of up to 300 characters and a howToTest of up to 500.");
+        if (r.Updates.Any(u => openIds is null || !openIds.Contains(u.Id))) v.Add("Each update must use the id of an open hypothesis you were given.");
+        if (r.Updates.Select(u => u.Id).Distinct().Count() != r.Updates.Count) v.Add("Give at most one update per hypothesis.");
+        if (r.Updates.Any(u => u.Outcome is not ("supported" or "contradicted" or "inconclusive") || string.IsNullOrWhiteSpace(u.Evidence))) v.Add("Each update needs an outcome (supported, contradicted or inconclusive) and evidence.");
+        if (q.Measured < 5 && r.Updates.Any(u => u.Outcome is "supported" or "contradicted")) v.Add("With fewer than 5 measured posts an update can only be inconclusive.");
         if (string.IsNullOrWhiteSpace(r.Headline)) v.Add("A headline is required.");
         if (r.Confidence is not ("low" or "medium" or "high")) v.Add("confidence must be low, medium or high.");
         if (q.Measured < 5 && r.Confidence != "low") v.Add("With fewer than 5 measured posts the confidence must be \"low\".");

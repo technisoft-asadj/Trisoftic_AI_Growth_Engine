@@ -19,7 +19,7 @@ namespace TriSoftic.GrowthEngine.Modules.Planning;
 /// </summary>
 public static class PlanningModule
 {
-    public static IServiceCollection AddPlanningModule(this IServiceCollection s, IConfiguration c) => s.AddModuleDbContext<PlanningDbContext>(c, PlanningDbContext.Schema).AddScoped<PlanOps>().AddScoped<HookTestService>().AddAutopilot(c);
+    public static IServiceCollection AddPlanningModule(this IServiceCollection s, IConfiguration c) => s.AddModuleDbContext<PlanningDbContext>(c, PlanningDbContext.Schema).AddScoped<PlanOps>().AddScoped<HookTestService>().AddScoped<LearningService>().AddAutopilot(c);
 
     public sealed record CreatePlanRequest(string Name, string Goal, DateOnly StartDate, int Days, int? EveryDays, string? TimeUtc, string? Channel, string? Language, Guid? FromReviewId);
 
@@ -80,7 +80,7 @@ public static class PlanningModule
                     statuses.TryGetValue(s.ContentItemId ?? Guid.Empty, out var c); perfs.TryGetValue(s.ContentItemId ?? Guid.Empty, out var p);
                     return new
                     {
-                        s.Id, s.Position, s.ScheduledFor, s.Angle, s.Brief, s.HookType, s.TestId, s.Variant, s.Visual, s.ImageBrief, s.Status, s.ContentItemId,
+                        s.Id, s.Position, s.ScheduledFor, s.Angle, s.Brief, s.HookType, s.TestId, s.Variant, s.Visual, s.ImageBrief, s.HypothesisId, s.Status, s.ContentItemId,
                         content = c is null ? null : new { c.Title, c.Status, c.ScheduledFor, approved = c.ApprovedVersion == c.CurrentVersion },
                         results = p is null ? null : new { p.PublishedAt, p.Url, p.MeasuredAt, p.Reactions, p.Comments, p.Shares, p.Views, p.Reach, p.Clicks, p.Note },
                     };
@@ -133,6 +133,7 @@ public static class PlanningModule
 
         AutopilotEndpoints.Map(g);
         HookTestEndpoints.Map(g);
+        LearningEndpoints.Map(g);
 
         return app;
     }

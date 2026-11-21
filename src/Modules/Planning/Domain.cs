@@ -62,6 +62,8 @@ public sealed class PlanSlot : IOrganizationScoped
     public string? Visual { get; set; }
     /// <summary>For an image: a one-sentence description of a flat cartoon scene (no people, screens, words or logos), used when no uploaded picture is available.</summary>
     public string? ImageBrief { get; set; }
+    /// <summary>The open hypothesis this post is designed to test (see the learnings register).</summary>
+    public Guid? HypothesisId { get; set; }
     public string? Variant { get; set; }
     /// <summary>What the reviewer objected to last time, passed to the next draft.</summary>
     public string? Guidance { get; set; }
@@ -136,6 +138,31 @@ public sealed class AutopilotDecision : IOrganizationScoped
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+public enum LearningStatus { Open, Supported, Contradicted, Retired }
+
+/// <summary>
+/// One entry in a product's learnings register: a hypothesis about what works ("question openings get more comments than announcements"), what the figures later showed, and how sure we are.
+/// Reviews add and judge them; every new plan must test the open ones, so the register is worked through instead of forgotten.
+/// </summary>
+public sealed class Learning : IOrganizationScoped
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid OrganizationId { get; set; }
+    public Guid ProductId { get; set; }
+    public string Statement { get; set; } = "";
+    public string? HowToTest { get; set; }
+    public LearningStatus Status { get; set; }
+    /// <summary>low | medium | high, as given by the review that last judged it.</summary>
+    public string Confidence { get; set; } = "low";
+    public string? Evidence { get; set; }
+    public Guid? SourceReviewId { get; set; }
+    public int TimesTested { get; set; }
+    public Guid? LastTestedPlanId { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
 public enum HookTestStatus { Running, Concluded }
 
 /// <summary>
@@ -168,6 +195,7 @@ public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> option
     public DbSet<PlanSlot> Slots => Set<PlanSlot>();
     public DbSet<PlanReview> Reviews => Set<PlanReview>();
     public DbSet<HookTest> HookTests => Set<HookTest>();
+    public DbSet<Learning> Learnings => Set<Learning>();
     public DbSet<AutopilotSettings> Autopilot => Set<AutopilotSettings>();
     public DbSet<AutopilotDecision> Decisions => Set<AutopilotDecision>();
 
@@ -193,6 +221,13 @@ public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> option
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             e.HasIndex(x => new { x.PlanId, x.Position }).IsUnique();
             e.HasOne<GrowthPlan>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<Learning>(e =>
+        {
+            e.ToTable("learnings"); e.HasKey(x => x.Id);
+            e.Property(x => x.Statement).HasMaxLength(400); e.Property(x => x.HowToTest).HasMaxLength(600); e.Property(x => x.Evidence).HasMaxLength(2000); e.Property(x => x.Confidence).HasMaxLength(10);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.HasIndex(x => new { x.ProductId, x.Status });
         });
         b.Entity<HookTest>(e =>
         {

@@ -44,6 +44,7 @@ public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductK
                     // Each step re-reads the database: an earlier step updates rows directly, and a stale in-memory copy would hide that.
                     if (await tests.ConcludeFinishedAsync(productId, ct) is > 0 and var done) notes.Add($"Concluded {done} hook test(s).");
                     await ReviewFinishedPlansAsync(s, notes, ct); db.ChangeTracker.Clear();
+                    await WeeklyReviewsAsync(s, notes, ct); db.ChangeTracker.Clear();
                     await EnsurePlanAsync(s, notes, ct); db.ChangeTracker.Clear();
                     await DraftAsync(s, notes, ct); db.ChangeTracker.Clear();
                     await ReviewPostsAsync(s, k, notes, ct); db.ChangeTracker.Clear();
@@ -193,7 +194,8 @@ public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductK
         {
             var end = await db.Slots.Where(x => x.PlanId == plan.Id).MaxAsync(x => (DateTimeOffset?)x.ScheduledFor, ct);
             if (end is null || end > cutoff) continue;
-            if (!await db.Reviews.AnyAsync(r => r.PlanId == plan.Id, ct))
+            var lastReview = await db.Reviews.Where(r => r.PlanId == plan.Id).MaxAsync(r => (DateTimeOffset?)r.CreatedAt, ct);
+            if (lastReview is null || lastReview < end)
             {
                 var r = await ops.ReviewPlanAsync(plan.Id, null, ct);
                 if (!r.Ok)
@@ -205,6 +207,25 @@ public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductK
             }
             plan.Status = PlanStatus.Completed; plan.UpdatedAt = clock.UtcNow;
             await db.SaveChangesAsync(ct);
+        }
+    }
+
+    // 5b. a plan longer than a week is reviewed every week while it runs, so the learnings register keeps moving
+    private async Task WeeklyReviewsAsync(AutopilotSettings s, List<string> notes, CancellationToken ct)
+    {
+        var now = clock.UtcNow; var today = DateOnly.FromDateTime(now.UtcDateTime);
+        foreach (var plan in await Managed(s.ProductId).ToListAsync(ct))
+        {
+            if (plan.StartDate.AddDays(7) > today) continue;
+            var last = await db.Reviews.Where(r => r.PlanId == plan.Id).MaxAsync(r => (DateTimeOffset?)r.CreatedAt, ct);
+            if (last is not null && last > now.AddDays(-7)) continue;
+            var since = last ?? plan.CreatedAt;
+            var fresh = (await catalog.GetPublishedAsync(s.ProductId, s.Channel, ct)).Count(p => p.PublishedAt > since);
+            if (fresh < 3) continue;   // too little new to say anything
+            var r = await ops.ReviewPlanAsync(plan.Id, null, ct);
+            if (r.Ok) { notes.Add($"Weekly review of \"{plan.Name}\" recorded."); continue; }
+            if (r.Error!.Status is 402 or 503) throw new AiException(r.Error.Title, r.Error.Outcome == "Paused" ? AiOutcome.Paused : AiOutcome.BudgetBlocked);
+            notes.Add("Could not do the weekly review: " + r.Error.Title);
         }
     }
 

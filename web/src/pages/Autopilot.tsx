@@ -110,6 +110,8 @@ function Panel({ pid }: { pid: string }) {
         <p className="muted">It only works from the verified product profile, never publishes more than the daily limit, stops when AI spending reaches its monthly budget, and handles only plans it created itself.</p>
       </form>
 
+      <Learnings pid={pid} />
+
       <div className="card">
         <h3>What the AI reviewer decided</h3>
         {d && d.decisions.length === 0 && <p className="muted">No decisions yet.</p>}
@@ -128,5 +130,40 @@ function Panel({ pid }: { pid: string }) {
         )}
       </div>
     </>
+  )
+}
+
+interface LearningRow { id: string; statement: string; howToTest?: string | null; status: string; confidence: string; evidence?: string | null; timesTested: number; fromReview: boolean }
+const learnClass = (s: string) => (s === 'Supported' ? 'badge ok' : s === 'Contradicted' ? 'badge warn' : 'badge')
+
+/** What we think works, what the results later showed, and how sure we are. Every new plan has to test the open ones. */
+function Learnings({ pid }: { pid: string }) {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['learnings', pid], queryFn: () => api.get<LearningRow[]>(`/api/v1/products/${pid}/learnings`) })
+  const [text, setText] = useState('')
+  const reload = () => void qc.invalidateQueries({ queryKey: ['learnings', pid] })
+  const add = useMutation({ mutationFn: () => api.post(`/api/v1/products/${pid}/learnings`, { statement: text }), onSuccess: () => { setText(''); reload() } })
+  const retire = useMutation({ mutationFn: (id: string) => api.post(`/api/v1/learnings/${id}/retire`), onSuccess: reload })
+  const rows = q.data ?? []
+  return (
+    <div className="card">
+      <h3>What we are learning</h3>
+      <p className="muted">After each plan (and every week while a long plan runs) the review adds guesses worth testing and judges the open ones from the results. The next plan must test the open ones. A verdict of "supported" or "contradicted" needs at least 5 posts with figures; otherwise it stays open as inconclusive and is retired after 3 tests.</p>
+      {rows.length === 0 && <p className="muted">Nothing yet. The first review adds entries here.</p>}
+      {rows.map((l) => (
+        <p key={l.id}>
+          <span className={learnClass(l.status)}>{l.status}</span> <b>{l.statement}</b>
+          {l.status !== 'Open' || l.timesTested > 0 ? <span className="muted"> · confidence {l.confidence} · tested {l.timesTested}x</span> : null}
+          {l.howToTest && <><br /><span className="muted">How to test: {l.howToTest}</span></>}
+          {l.evidence && <><br /><span className="muted">Result: {l.evidence}</span></>}
+          {l.status === 'Open' && <> <button className="link" disabled={retire.isPending} onClick={() => { if (window.confirm('Retire this hypothesis? Plans will stop testing it.')) retire.mutate(l.id) }}>Retire</button></>}
+        </p>
+      ))}
+      <form className="row" onSubmit={(e: FormEvent) => { e.preventDefault(); add.mutate() }}>
+        <label style={{ flex: 1 }}>Add your own guess<input value={text} maxLength={300} onChange={(e) => setText(e.target.value)} placeholder="For example: posts in the evening get more comments than posts at lunchtime" /></label>
+        <button type="submit" className="secondary" disabled={add.isPending || text.trim().length < 5}>Add</button>
+      </form>
+      {err(add.error ?? retire.error) && <p className="error" role="alert">{err(add.error ?? retire.error)}</p>}
+    </div>
   )
 }

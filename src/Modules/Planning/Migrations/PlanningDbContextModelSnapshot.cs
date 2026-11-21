@@ -318,6 +318,66 @@ namespace TriSoftic.GrowthEngine.Modules.Planning.Migrations
                     b.ToTable("hook_tests", "planning");
                 });
 
+            modelBuilder.Entity("TriSoftic.GrowthEngine.Modules.Planning.Learning", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Confidence")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Evidence")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("HowToTest")
+                        .HasMaxLength(600)
+                        .HasColumnType("character varying(600)");
+
+                    b.Property<Guid?>("LastTestedPlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SourceReviewId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Statement")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("TimesTested")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId", "Status");
+
+                    b.ToTable("learnings", "planning");
+                });
+
             modelBuilder.Entity("TriSoftic.GrowthEngine.Modules.Planning.PlanReview", b =>
                 {
                     b.Property<Guid>("Id")
@@ -399,6 +459,9 @@ namespace TriSoftic.GrowthEngine.Modules.Planning.Migrations
                     b.Property<string>("HookType")
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
+
+                    b.Property<Guid?>("HypothesisId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ImageBrief")
                         .HasMaxLength(400)
