@@ -29,6 +29,7 @@ public static class AiModule
         s.AddScoped<IAiDraftLookup, AiDraftLookup>();
         s.AddScoped<IContentDrafter, ContentDrafter>();
         s.AddScoped<IImageMaker, ImageMaker>();
+        s.AddScoped<IAiSpendReader, AiSpendReader>();
         return s;
     }
 

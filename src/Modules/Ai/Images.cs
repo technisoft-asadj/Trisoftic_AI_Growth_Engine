@@ -210,3 +210,17 @@ public sealed class ImageMaker(ImageGenerator gen) : IImageMaker
         return r.IsSuccess ? (r.Value!.AssetId, null, r.Value.CostUsd) : (null, r.Error!.Message, 0m);
     }
 }
+
+/// <summary>Month-to-date spend against the monthly limits, for the autopilot's alerts.</summary>
+public sealed class AiSpendReader(AiDbContext db, IOptions<AiOptions> options, IClock clock) : IAiSpendReader
+{
+    public async Task<AiSpend> GetAsync(Guid productId, CancellationToken ct)
+    {
+        var now = clock.UtcNow; var start = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var q = db.Usage.AsNoTracking().Where(u => u.OccurredAt >= start && u.Outcome == AiOutcome.Succeeded);
+        var global = await q.SumAsync(u => (decimal?)u.EstimatedCostUsd, ct) ?? 0m;
+        var product = await q.Where(u => u.ProductId == productId).SumAsync(u => (decimal?)u.EstimatedCostUsd, ct) ?? 0m;
+        var o = options.Value;
+        return new AiSpend(product, o.MonthlyBudgetUsdPerProduct, global, o.MonthlyBudgetUsdGlobal, o.AlertThreshold);
+    }
+}

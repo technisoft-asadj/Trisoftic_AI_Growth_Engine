@@ -391,3 +391,11 @@ public sealed class PullPageFiguresHandler(PublishingDbContext db, IEnumerable<I
         row.Value = value; row.MetricUsed = metric; row.Reason = reason is null ? null : (reason.Length > 480 ? reason[..480] : reason); row.MeasuredAt = now;
     }
 }
+
+/// <summary>Account state for the autopilot's alerts. No tokens leave this module.</summary>
+public sealed class ChannelHealthReader(PublishingDbContext db) : IChannelHealth
+{
+    public async Task<IReadOnlyList<ChannelHealth>> ListAsync(Guid productId, CancellationToken ct) =>
+        (await db.Accounts.AsNoTracking().Where(a => a.ProductId == productId).OrderBy(a => a.DisplayName).ToListAsync(ct))
+        .Select(a => new ChannelHealth(a.Channel, a.DisplayName, a.Status.ToString(), a.TokenExpiresAt, a.LastError)).ToList();
+}

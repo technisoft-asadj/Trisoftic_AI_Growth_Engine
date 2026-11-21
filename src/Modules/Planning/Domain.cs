@@ -198,6 +198,8 @@ public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> option
     public DbSet<Learning> Learnings => Set<Learning>();
     public DbSet<AutopilotSettings> Autopilot => Set<AutopilotSettings>();
     public DbSet<AutopilotDecision> Decisions => Set<AutopilotDecision>();
+    public DbSet<OwnerAlert> Alerts => Set<OwnerAlert>();
+    public DbSet<OwnerDigest> Digests => Set<OwnerDigest>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -221,6 +223,18 @@ public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> option
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             e.HasIndex(x => new { x.PlanId, x.Position }).IsUnique();
             e.HasOne<GrowthPlan>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<OwnerAlert>(e =>
+        {
+            e.ToTable("owner_alerts"); e.HasKey(x => x.Id);
+            e.Property(x => x.Key).HasMaxLength(200); e.Property(x => x.Severity).HasMaxLength(10); e.Property(x => x.Message).HasMaxLength(1000);
+            e.HasIndex(x => new { x.ProductId, x.ResolvedAt });
+        });
+        b.Entity<OwnerDigest>(e =>
+        {
+            e.ToTable("owner_digests"); e.HasKey(x => x.Id);
+            e.Property(x => x.Subject).HasMaxLength(200); e.Property(x => x.Body).HasMaxLength(8000);
+            e.HasIndex(x => new { x.ProductId, x.CreatedAt });
         });
         b.Entity<Learning>(e =>
         {

@@ -36,6 +36,7 @@ public static class PublishingModule
         s.AddScoped<IChannelPublisher>(sp => sp.GetRequiredService<FacebookGraph>());
         if (c.GetValue<bool>("Publishing:AllowSandbox")) s.AddScoped<IChannelPublisher, SandboxPublisher>();
         s.AddScoped<PublishPipeline>();
+        s.AddScoped<IChannelHealth, ChannelHealthReader>();
         s.AddScoped<IJobHandler, PublishJobHandler>();
         s.AddScoped<IJobHandler, DispatchHandler>();
         s.AddScoped<IJobHandler, TokenCheckHandler>();

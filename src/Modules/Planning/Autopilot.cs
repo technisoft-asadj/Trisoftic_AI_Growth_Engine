@@ -280,6 +280,15 @@ public sealed class AutopilotLoop(IServiceScopeFactory scopes, IConfiguration cf
                             using var scope = scopes.CreateScope();
                             await scope.ServiceProvider.GetRequiredService<AutopilotEngine>().RunAsync(pid, stop);
                         });
+                        // checking for problems must never stop the autopilot, and a failure here is only logged
+                        try
+                        {
+                            using var scope = scopes.CreateScope();
+                            var ops = scope.ServiceProvider.GetRequiredService<OpsService>();
+                            await ops.CheckAlertsAsync(pid, stop);
+                            await ops.DigestIfDueAsync(pid, stop);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException) { log.LogError(ex, "Owner checks failed for product {ProductId}", pid); }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException) { log.LogError(ex, "Autopilot run failed for product {ProductId}", pid); }
                 }

@@ -110,6 +110,8 @@ function Panel({ pid }: { pid: string }) {
         <p className="muted">It only works from the verified product profile, never publishes more than the daily limit, stops when AI spending reaches its monthly budget, and handles only plans it created itself.</p>
       </form>
 
+      <OwnerOps pid={pid} />
+
       <Learnings pid={pid} />
 
       <div className="card">
@@ -164,6 +166,38 @@ function Learnings({ pid }: { pid: string }) {
         <button type="submit" className="secondary" disabled={add.isPending || text.trim().length < 5}>Add</button>
       </form>
       {err(add.error ?? retire.error) && <p className="error" role="alert">{err(add.error ?? retire.error)}</p>}
+    </div>
+  )
+}
+
+interface OpsData { alerts: { id: string; key: string; severity: string; message: string; openedAt: string }[]; digests: { id: string; subject: string; body: string; createdAt: string; emailed: boolean }[] }
+
+/** Problems that need the owner, and the weekly report. Alerts close by themselves when the cause is gone. */
+function OwnerOps({ pid }: { pid: string }) {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['ops', pid], queryFn: () => api.get<OpsData>(`/api/v1/products/${pid}/ops`), refetchInterval: 60000 })
+  const reload = () => void qc.invalidateQueries({ queryKey: ['ops', pid] })
+  const check = useMutation({ mutationFn: () => api.post(`/api/v1/products/${pid}/ops/check`), onSuccess: reload })
+  const digest = useMutation({ mutationFn: () => api.post(`/api/v1/products/${pid}/ops/digest`), onSuccess: reload })
+  const alerts = q.data?.alerts ?? []; const digests = q.data?.digests ?? []
+  return (
+    <div className="card">
+      <h3>Problems and weekly report</h3>
+      {alerts.length === 0 ? <p className="muted">No open problems.</p> : alerts.map((x) => (
+        <p key={x.id}><span className={x.severity === 'critical' ? 'badge warn' : 'badge'}>{x.severity}</span> {x.message} <span className="muted">since {new Date(x.openedAt).toLocaleString()}</span></p>
+      ))}
+      <div className="row">
+        <button className="secondary" disabled={check.isPending} onClick={() => check.mutate()}>Check now</button>
+        <button className="secondary" disabled={digest.isPending} onClick={() => digest.mutate()}>Write this week's report now</button>
+      </div>
+      {digests.length === 0 && <p className="muted">The first weekly report is written a week after the autopilot starts. If an owner email is configured on the server, problems and reports are also emailed.</p>}
+      {digests.map((d, i) => (
+        <details key={d.id} open={i === 0}>
+          <summary><b>{d.subject}</b> <span className="muted">{new Date(d.createdAt).toLocaleDateString()}{d.emailed ? ' · emailed' : ''}</span></summary>
+          <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>{d.body}</pre>
+        </details>
+      ))}
+      {err(check.error ?? digest.error) && <p className="error" role="alert">{err(check.error ?? digest.error)}</p>}
     </div>
   )
 }
