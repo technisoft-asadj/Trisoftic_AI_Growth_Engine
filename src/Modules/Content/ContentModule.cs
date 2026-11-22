@@ -44,13 +44,13 @@ public static class ContentModule
     private static IResult Illegal(IllegalTransitionException ex) => Results.Problem(statusCode: 409, title: ex.Message);
 
     /// <summary>Checks the files a version wants to carry against the shared media rules. Returns the distinct ids, or the reasons they are refused.</summary>
-    private static async Task<(List<Guid> Ids, List<string> Errors)> ResolveMediaAsync(IAssetCatalog assets, string format, Guid productId, IEnumerable<Guid>? requested, DateTimeOffset now, CancellationToken ct, bool complete = false)
+    private static async Task<(List<Guid> Ids, List<string> Errors)> ResolveMediaAsync(IAssetCatalog assets, string format, Guid productId, IEnumerable<Guid>? requested, DateTimeOffset now, CancellationToken ct, string? channel = null, bool complete = false)
     {
         var ids = (requested ?? []).Distinct().ToList();
-        if (ids.Count == 0) return (ids, MediaRules.Validate(format, [], productId, now, complete));
+        if (ids.Count == 0) return (ids, MediaRules.Validate(format, [], productId, now, complete, channel));
         var found = await assets.GetAsync(ids, ct);
         var errors = ids.Where(i => found.All(f => f.Id != i)).Select(i => "An attached file was not found.").Distinct().ToList();
-        errors.AddRange(MediaRules.Validate(format, found, productId, now, complete));
+        errors.AddRange(MediaRules.Validate(format, found, productId, now, complete, channel));
         return (ids, errors);
     }
 
@@ -187,7 +187,7 @@ public static class ContentModule
             if (i is null) return Results.NotFound();
             var cur = await db.Versions.AsNoTracking().FirstAsync(v => v.ContentItemId == id && v.Number == i.CurrentVersion, ct);
             if (string.IsNullOrWhiteSpace(cur.Body) && i.Format != "Story") return Results.Problem(statusCode: 400, title: "Add some content before submitting for approval");
-            var (_, mediaErrors) = await ResolveMediaAsync(assets, i.Format, i.ProductId, cur.AssetIds, clock.UtcNow, ct, complete: true);
+            var (_, mediaErrors) = await ResolveMediaAsync(assets, i.Format, i.ProductId, cur.AssetIds, clock.UtcNow, ct, i.Channel, complete: true);
             if (mediaErrors.Count > 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["media"] = [.. mediaErrors] });
             try { i.Submit(); } catch (IllegalTransitionException ex) { return Illegal(ex); }
             i.UpdatedAt = clock.UtcNow;

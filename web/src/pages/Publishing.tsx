@@ -88,6 +88,11 @@ function Channels() {
     mutationFn: () => api.get<{ url: string }>(`/api/v1/publishing/connect/facebook/start?productId=${pid}&channel=${encodeURIComponent(channel)}`),
     onSuccess: (r) => { window.location.href = r.url },
   })
+  // Instagram is reached through its Facebook Page: the login asks for the Instagram permissions too, and the Page picked must have an Instagram professional account linked.
+  const startIg = useMutation({
+    mutationFn: () => api.get<{ url: string }>(`/api/v1/publishing/connect/facebook/start?productId=${pid}&channel=Instagram&kind=instagram`),
+    onSuccess: (r) => { window.location.href = r.url },
+  })
   return (
     <>
       <div className="row">{select}</div>
@@ -112,10 +117,12 @@ function Channels() {
         <div className="row">
           <label>Channel name<input value={channel} onChange={(e) => setChannel(e.target.value)} /></label>
           <button disabled={!caps.data?.facebookConfigured || !channel.trim() || startFb.isPending} onClick={() => startFb.mutate()}>Connect a Facebook Page</button>
+          <button className="secondary" disabled={!caps.data?.facebookConfigured || startIg.isPending} onClick={() => startIg.mutate()}>Connect Instagram</button>
           {caps.data?.sandboxEnabled && <button className="secondary" disabled={!channel.trim() || sandbox.isPending} onClick={() => sandbox.mutate()}>Connect sandbox (no real posting)</button>}
         </div>
         {caps.data && !caps.data.facebookConfigured && <p className="muted">Facebook is not set up on this server yet: it needs a Meta developer app (App ID, App Secret and the redirect address in the server settings). Pages can only be posted to by people who have a role on the page, and Meta’s app review is needed before anyone else can connect.</p>}
-        {err(sandbox.error ?? startFb.error) && <p className="error" role="alert">{err(sandbox.error ?? startFb.error)}</p>}
+        <p className="muted"><b>Instagram:</b> the account must be an Instagram Business or Creator account linked to your Facebook Page (Page settings, Linked accounts). Choose that same Page on the next screen. Instagram posts always need a picture or a video, and a video goes out as a Reel.</p>
+        {err(sandbox.error ?? startFb.error ?? startIg.error) && <p className="error" role="alert">{err(sandbox.error ?? startFb.error ?? startIg.error)}</p>}
       </div>
     </>
   )

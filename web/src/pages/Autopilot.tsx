@@ -9,7 +9,7 @@ interface Product { id: string; name: string; isArchived: boolean }
 interface Check { name: string; passed: boolean; detail: string }
 interface Decision { id: string; contentItemId?: string; version: number; verdict: string; attempt: number; reasons: string; costUsd: number; createdAt: string; checks: Check[] }
 interface State {
-  enabled: boolean; channel: string; language?: string | null; goal: string; planDays: number; everyDays: number; postTimeUtc: string; postTimesUtc?: string[]; maxPostsPerDay: number; lookaheadHours: number; useImages: boolean; useVideos: boolean
+  enabled: boolean; channel: string; language?: string | null; goal: string; planDays: number; everyDays: number; postTimeUtc: string; postTimesUtc?: string[]; maxPostsPerDay: number; lookaheadHours: number; alsoInstagram?: boolean; useImages: boolean; useVideos: boolean
   lastRunAt?: string | null; lastRunNote?: string | null
   needsYou: { contentItemId: string; reasons: string; createdAt: string; title: string }[]
   week: { verdict: string; n: number; cost: number }[]
@@ -38,12 +38,12 @@ export function AutopilotPage() {
 function Panel({ pid }: { pid: string }) {
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['autopilot', pid], queryFn: () => api.get<State>(`/api/v1/products/${pid}/autopilot`), refetchInterval: 30000 })
-  const [f, setF] = useState({ goal: '', channel: 'Facebook', language: '', planDays: 7, everyDays: 1, postTimesUtc: ['13:00'], maxPostsPerDay: 2, lookaheadHours: 72, useImages: true, useVideos: true })
+  const [f, setF] = useState({ goal: '', channel: 'Facebook', language: '', planDays: 7, everyDays: 1, postTimesUtc: ['13:00'], maxPostsPerDay: 2, lookaheadHours: 72, useImages: true, useVideos: true, alsoInstagram: false })
   const [loaded, setLoaded] = useState(false)
   useEffect(() => {
     if (q.data && !loaded) {
       setLoaded(true)
-      setF({ goal: q.data.goal, channel: q.data.channel, language: q.data.language ?? '', planDays: q.data.planDays, everyDays: q.data.everyDays, postTimesUtc: q.data.postTimesUtc?.length ? q.data.postTimesUtc : [q.data.postTimeUtc], maxPostsPerDay: q.data.maxPostsPerDay, lookaheadHours: q.data.lookaheadHours, useImages: q.data.useImages, useVideos: q.data.useVideos })
+      setF({ goal: q.data.goal, channel: q.data.channel, language: q.data.language ?? '', planDays: q.data.planDays, everyDays: q.data.everyDays, postTimesUtc: q.data.postTimesUtc?.length ? q.data.postTimesUtc : [q.data.postTimeUtc], maxPostsPerDay: q.data.maxPostsPerDay, lookaheadHours: q.data.lookaheadHours, useImages: q.data.useImages, useVideos: q.data.useVideos, alsoInstagram: q.data.alsoInstagram ?? false })
     }
   }, [q.data, loaded])
   const save = useMutation({
@@ -114,6 +114,7 @@ function Panel({ pid }: { pid: string }) {
         </div>
         <label><input type="checkbox" checked={f.useImages} onChange={(e) => setF({ ...f, useImages: e.target.checked })} /> Add pictures to posts when they help: your own uploaded pictures first, then AI cartoon pictures (about $0.04 each, within the monthly limit)</label>
         <label><input type="checkbox" checked={f.useVideos} onChange={(e) => setF({ ...f, useVideos: e.target.checked })} /> Post Reels from your uploaded vertical videos (9:16, 3 to 90 seconds, usage rights set in Assets)</label>
+        <label><input type="checkbox" checked={f.alsoInstagram} onChange={(e) => setF({ ...f, alsoInstagram: e.target.checked })} /> Also post to Instagram: each approved post that has a picture or video is copied to your connected Instagram account an hour later, with its own tracked link. Posts without media are skipped (Instagram has no text-only posts). Connect Instagram under Publishing first.</label>
         <p className="muted">The planner chooses text, picture or video for every post, favouring what the results table shows works and otherwise mixing them so we learn. Each picture or video is used once. It never makes video, and AI pictures never show people, app screens or gameplay. If no picture or video is available, the post goes out as text.</p>
         <button type="submit" className="secondary" disabled={save.isPending || !f.goal.trim()}>Save settings</button>
         <p className="muted">It only works from the verified product profile, never publishes more than the daily limit, stops when AI spending reaches its monthly budget, and handles only plans it created itself.</p>

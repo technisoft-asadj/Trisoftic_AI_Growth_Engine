@@ -15,6 +15,9 @@ public interface ITrackedLinks
     /// <summary>Makes a short link for an address. Returns null when no public base address is configured, so the caller keeps the original address.</summary>
     Task<TrackedLink?> CreateAsync(Guid productId, string destinationUrl, string channel, string campaign, string? label, CancellationToken ct = default);
 
+    /// <summary>Makes a new short link for the same destination as an existing short link of this product, for another channel (the Instagram copy of a post). Null when the address is not this product's short link.</summary>
+    Task<TrackedLink?> RetargetAsync(Guid productId, string shortUrl, string channel, string? label, CancellationToken ct = default);
+
     /// <summary>Ties links made while drafting to the post they ended up in, so clicks can be reported per post.</summary>
     Task AttachAsync(IReadOnlyCollection<Guid> linkIds, Guid contentItemId, CancellationToken ct = default);
 

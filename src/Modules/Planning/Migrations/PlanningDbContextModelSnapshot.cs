@@ -91,6 +91,9 @@ namespace TriSoftic.GrowthEngine.Modules.Planning.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("AlsoInstagram")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Channel")
                         .IsRequired()
                         .HasMaxLength(60)
@@ -320,6 +323,52 @@ namespace TriSoftic.GrowthEngine.Modules.Planning.Migrations
                     b.HasIndex("ProductId", "CreatedAt");
 
                     b.ToTable("hook_tests", "planning");
+                });
+
+            modelBuilder.Entity("TriSoftic.GrowthEngine.Modules.Planning.InstagramMirror", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("MirrorItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ScheduledFor")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SlotId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SourceItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("SourceItemId")
+                        .IsUnique();
+
+                    b.ToTable("instagram_mirrors", "planning");
                 });
 
             modelBuilder.Entity("TriSoftic.GrowthEngine.Modules.Planning.Learning", b =>

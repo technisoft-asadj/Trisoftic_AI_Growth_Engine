@@ -35,11 +35,11 @@ public static class AutopilotGates
     private static readonly Regex RealClaim = new(@"\b(screen\s?shots?|game\s?play|in-?game|footage|recording|recorded|real match|live match|actual game)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>Checks for a post that carries a picture or video. AI pictures must never be presented as real screens or gameplay; uploaded files must have clear usage rights.</summary>
-    public static List<GateResult> CheckMedia(string format, IReadOnlyList<AssetInfo> media, Guid productId, DateTimeOffset now, string body, string? imageBrief, Func<string, string?>? checkBrief)
+    public static List<GateResult> CheckMedia(string format, IReadOnlyList<AssetInfo> media, Guid productId, DateTimeOffset now, string body, string? imageBrief, Func<string, string?>? checkBrief, string? channel = null)
     {
         var g = new List<GateResult>();
         if (media.Count == 0) return g;
-        var rules = MediaRules.Validate(format, media, productId, now, complete: true);
+        var rules = MediaRules.Validate(format, media, productId, now, complete: true, channel);
         g.Add(new GateResult("media follows the rules", rules.Count == 0, string.Join(" ", rules)));
         var unclear = media.Where(a => !a.IsSynthetic && a.Rights is not ("Unrestricted" or "LicensedWithLimits")).Select(a => a.Name).ToList();
         g.Add(new GateResult("media rights are clear", unclear.Count == 0, "Usage rights are not marked clear for: " + string.Join(", ", unclear) + "."));

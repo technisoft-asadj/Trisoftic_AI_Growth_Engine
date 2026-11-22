@@ -19,7 +19,7 @@ public static class PublishingModule
     public sealed record VersionIn(int Version);
     public sealed record ManualIn(int Version, string Url, string? ProviderPostId, string? Note);
 
-    private sealed record StatePayload(Guid ProductId, Guid UserId, string Channel, DateTimeOffset Expires);
+    private sealed record StatePayload(Guid ProductId, Guid UserId, string Channel, DateTimeOffset Expires, string? Kind = null);
 
     /// <param name="runScheduler">Hosts that run background jobs set this so due posts are dispatched. Several hosts doing so is harmless.</param>
     public static IServiceCollection AddPublishingModule(this IServiceCollection s, IConfiguration c, bool runScheduler)
@@ -35,6 +35,8 @@ public static class PublishingModule
         s.AddScoped<IFacebookGraph>(sp => sp.GetRequiredService<FacebookGraph>());
         s.AddScoped<IChannelPublisher>(sp => sp.GetRequiredService<FacebookGraph>());
         if (c.GetValue<bool>("Publishing:AllowSandbox")) s.AddScoped<IChannelPublisher, SandboxPublisher>();
+        s.AddScoped<PublicMedia>();
+        s.AddScoped<IChannelPublisher, InstagramGraph>();
         s.AddScoped<PublishPipeline>();
         s.AddScoped<IChannelHealth, ChannelHealthReader>();
         s.AddScoped<IJobHandler, PublishJobHandler>();
@@ -59,6 +61,7 @@ public static class PublishingModule
         MapPageHealth(g);
         CommentEndpoints.Map(g);
         MapCallback(app);
+        PublicMedia.Map(app);
         return app;
     }
 
@@ -86,13 +89,13 @@ public static class PublishingModule
             return Results.Created($"/api/v1/publishing/accounts/{a.Id}", AccountDto(a));
         });
 
-        g.MapGet("/connect/facebook/start", (Guid productId, string channel, ICurrentUser u, IFacebookGraph fb, IDataProtectionProvider dp, IClock clock) =>
+        g.MapGet("/connect/facebook/start", (Guid productId, string channel, string? kind, ICurrentUser u, IFacebookGraph fb, IDataProtectionProvider dp, IClock clock) =>
         {
             if (!u.HasPermission(Permissions.AccountsConnect) || u.UserId is not { } uid) return Results.Forbid();
             if (!fb.IsConfigured) return Results.Problem(statusCode: 409, title: "Facebook is not configured (Publishing:Facebook:AppId, AppSecret, RedirectUri)");
             if (string.IsNullOrWhiteSpace(channel) || channel.Length > 60) return Results.Problem(statusCode: 400, title: "A channel name is required");
-            var state = dp.CreateProtector("publishing.fb-state").Protect(JsonSerializer.Serialize(new StatePayload(productId, uid, channel.Trim(), clock.UtcNow.AddMinutes(15))));
-            return Results.Ok(new { url = fb.AuthorizeUrl(state) });
+            var state = dp.CreateProtector("publishing.fb-state").Protect(JsonSerializer.Serialize(new StatePayload(productId, uid, channel.Trim(), clock.UtcNow.AddMinutes(15), kind == "instagram" ? "instagram" : null)));
+            return Results.Ok(new { url = fb.AuthorizeUrl(state, kind == "instagram") });
         });
 
         g.MapGet("/connect/pending/{id:guid}", async (Guid id, PublishingDbContext db, ICurrentUser u, TokenVault vault, IClock clock, CancellationToken ct) =>
@@ -103,13 +106,26 @@ public static class PublishingModule
             return Results.Ok(pages.Select(x => new { x.Id, x.Name }));   // tokens stay server-side
         });
 
-        g.MapPost("/connect/pending/{id:guid}/select", async (Guid id, SelectIn req, PublishingDbContext db, ICurrentUser u, TokenVault vault, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        g.MapPost("/connect/pending/{id:guid}/select", async (Guid id, SelectIn req, PublishingDbContext db, ICurrentUser u, IFacebookGraph fb, TokenVault vault, IClock clock, IAuditWriter audit, CancellationToken ct) =>
         {
             var p = await db.Pending.FirstOrDefaultAsync(x => x.Id == id && x.UserId == u.UserId && x.ExpiresAt > clock.UtcNow, ct);
             if (p is null || !u.HasPermission(Permissions.AccountsConnect) || !await u.CanAccessProductAsync(p.ProductId, ct)) return Results.NotFound();
             var pages = JsonSerializer.Deserialize<List<PageInfo>>(vault.Open(p.PagesJsonCipher)) ?? [];
             var page = pages.FirstOrDefault(x => x.Id == req.PageId);
             if (page is null) return Results.Problem(statusCode: 400, title: "That page is not one of the pages offered");
+            if (p.Provider.StartsWith("instagram|"))
+            {
+                // the Instagram professional account is found through the Page it is linked to; the Page's own token is used for it
+                InstagramAccount? ig;
+                try { ig = await fb.GetInstagramAccountAsync(page.Id, page.AccessToken, ct); }
+                catch (PublishException ex) { return Results.Problem(statusCode: 502, title: "Facebook could not look up the Instagram account: " + ex.Message); }
+                if (ig is null) return Results.Problem(statusCode: 409, title: $"No Instagram professional (Business or Creator) account is linked to the Page \"{page.Name}\". Link it in the Page settings under Linked accounts, then connect again.");
+                var igAccount = await ReplaceAsync(db, p.ProductId, "instagram", "Instagram", ig.Id, "@" + ig.Username, vault.Seal(page.AccessToken), u.UserId, clock.UtcNow, ct);
+                db.Pending.Remove(p);
+                await db.SaveChangesAsync(ct);
+                await audit.WriteAsync(new AuditEntry("publishing.account.connected", "ChannelAccount", igAccount.Id.ToString(), p.ProductId, igAccount.DisplayName, After: new { igAccount.Provider, igAccount.Channel }), ct);
+                return Results.Ok(AccountDto(igAccount));
+            }
             var channel = p.Provider.Contains('|') ? p.Provider[(p.Provider.IndexOf('|') + 1)..] : "Facebook";   // set when the connection was started
             var a = await ReplaceAsync(db, p.ProductId, "facebook-page", channel, page.Id, page.Name, vault.Seal(page.AccessToken), u.UserId, clock.UtcNow, ct);
             db.Pending.Remove(p);
@@ -224,7 +240,7 @@ public static class PublishingModule
                 var userToken = await fb.ExchangeCodeAsync(code, ct);
                 var pages = await fb.ListPagesAsync(userToken, ct);
                 if (pages.Count == 0) return Results.Redirect($"{web}/publishing/connect?error=nopages");
-                var pending = new PendingConnection { ProductId = s.ProductId, UserId = s.UserId, Provider = "facebook-page|" + s.Channel, PagesJsonCipher = vault.Seal(JsonSerializer.Serialize(pages)), ExpiresAt = clock.UtcNow.AddMinutes(15) };
+                var pending = new PendingConnection { ProductId = s.ProductId, UserId = s.UserId, Provider = (s.Kind == "instagram" ? "instagram|" : "facebook-page|") + s.Channel, PagesJsonCipher = vault.Seal(JsonSerializer.Serialize(pages)), ExpiresAt = clock.UtcNow.AddMinutes(15) };
                 db.Pending.Add(pending);
                 await db.SaveChangesAsync(ct);
                 return Results.Redirect($"{web}/publishing/connect?pending={pending.Id}");

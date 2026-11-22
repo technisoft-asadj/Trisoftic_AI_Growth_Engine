@@ -114,9 +114,12 @@ public sealed class SandboxPublisher : IChannelPublisher
 public interface IFacebookGraph
 {
     bool IsConfigured { get; }
-    string AuthorizeUrl(string state);
+    /// <summary>With <paramref name="instagram"/> the login also asks for the Instagram permissions. Only used when a person connects an Instagram account.</summary>
+    string AuthorizeUrl(string state, bool instagram = false);
     Task<string> ExchangeCodeAsync(string code, CancellationToken ct);
     Task<IReadOnlyList<PageInfo>> ListPagesAsync(string userToken, CancellationToken ct);
+    /// <summary>The Instagram professional account linked to a Page, or null when there is none.</summary>
+    Task<InstagramAccount?> GetInstagramAccountAsync(string pageId, string pageToken, CancellationToken ct);
 }
 
 public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) : IFacebookGraph, IChannelPublisher
@@ -134,8 +137,11 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
     public IReadOnlyCollection<string> SupportedFormats { get; } = ["Post", "Story", "Reel"];   // text, photos, one video, photo and video stories, reels
 
     // ---- OAuth ----
-    public string AuthorizeUrl(string state)
-        => $"https://www.facebook.com/{Version}/dialog/oauth?client_id={Uri.EscapeDataString(AppId)}&redirect_uri={Uri.EscapeDataString(RedirectUri)}&state={Uri.EscapeDataString(state)}&scope=pages_show_list,pages_manage_posts,pages_read_engagement,pages_read_user_content,pages_manage_engagement,read_insights";
+    public const string FacebookScopes = "pages_show_list,pages_manage_posts,pages_read_engagement,pages_read_user_content,pages_manage_engagement,read_insights";
+    public const string InstagramScopes = ",instagram_basic,instagram_content_publish,instagram_manage_insights";
+
+    public string AuthorizeUrl(string state, bool instagram = false)
+        => $"https://www.facebook.com/{Version}/dialog/oauth?client_id={Uri.EscapeDataString(AppId)}&redirect_uri={Uri.EscapeDataString(RedirectUri)}&state={Uri.EscapeDataString(state)}&scope={FacebookScopes}{(instagram ? InstagramScopes : "")}";
 
     public async Task<string> ExchangeCodeAsync(string code, CancellationToken ct)
     {
@@ -150,6 +156,14 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
     {
         var res = await GetJson($"{Base}/me/accounts?fields=id,name,access_token&limit=100&access_token={Uri.EscapeDataString(userToken)}", ct);
         return res.GetProperty("data").EnumerateArray().Select(p => new PageInfo(p.GetProperty("id").GetString()!, p.GetProperty("name").GetString() ?? "", p.GetProperty("access_token").GetString()!)).ToList();
+    }
+
+    public async Task<InstagramAccount?> GetInstagramAccountAsync(string pageId, string pageToken, CancellationToken ct)
+    {
+        var res = await GetJson($"{Base}/{pageId}?fields=instagram_business_account%7Bid,username%7D&access_token={Uri.EscapeDataString(pageToken)}", ct);
+        if (!res.TryGetProperty("instagram_business_account", out var ig) || ig.ValueKind != JsonValueKind.Object) return null;
+        var id = ig.TryGetProperty("id", out var i) ? i.GetString() : null;
+        return string.IsNullOrEmpty(id) ? null : new InstagramAccount(id, ig.TryGetProperty("username", out var u) ? u.GetString() ?? id : id);
     }
 
     // ---- publishing ----
@@ -451,7 +465,7 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
     private Task<JsonElement> GetJson(string url, CancellationToken ct) => Send(() => http.CreateClient("facebook").GetAsync(url, ct), ct);
 
     /// <summary>Calls Graph and maps every failure to a <see cref="PublishErrorKind"/>.</summary>
-    private static async Task<JsonElement> Send(Func<Task<HttpResponseMessage>> call, CancellationToken ct)
+    internal static async Task<JsonElement> Send(Func<Task<HttpResponseMessage>> call, CancellationToken ct)
     {
         HttpResponseMessage res;
         try { res = await call(); }

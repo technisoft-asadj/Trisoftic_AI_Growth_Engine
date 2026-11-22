@@ -31,7 +31,7 @@ public sealed class ContentPlanner(ContentDbContext db, ICurrentUser user, IAppr
         var cur = await db.Versions.AsNoTracking().FirstAsync(v => v.ContentItemId == itemId && v.Number == i.CurrentVersion, ct);
         if (string.IsNullOrWhiteSpace(cur.Body) && i.Format != "Story") return new StateChange(false, "Add some content before submitting for approval");
         var found = cur.AssetIds.Count == 0 ? [] : await assets.GetAsync(cur.AssetIds, ct);
-        if (MediaRules.Validate(i.Format, found, i.ProductId, clock.UtcNow, complete: true) is { Count: > 0 } mediaErrors) return new StateChange(false, string.Join(" ", mediaErrors));
+        if (MediaRules.Validate(i.Format, found, i.ProductId, clock.UtcNow, complete: true, i.Channel) is { Count: > 0 } mediaErrors) return new StateChange(false, string.Join(" ", mediaErrors));
         try { i.Submit(); } catch (IllegalTransitionException ex) { return new StateChange(false, ex.Message); }
         i.UpdatedAt = clock.UtcNow;
         await db.SaveChangesAsync(ct);

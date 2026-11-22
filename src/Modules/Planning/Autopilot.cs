@@ -20,7 +20,7 @@ public sealed record AutopilotReport(IReadOnlyList<string> Notes);
 /// when a plan ends. It only touches plans it created itself. Anything the reviewer is unsure about, or that keeps failing, is left for a person (the "Needs you" list).
 /// </summary>
 public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductKnowledge knowledge, IAiGenerator ai, IContentCatalog catalog, IContentPublishSource source,
-    IAgentApprovals agent, HookTestService tests, IAssetCatalog assetCatalog, IImageMaker maker, IPauseSwitch pause, IClock clock, IAuditWriter audit, ITrackedLinks links)
+    IAgentApprovals agent, HookTestService tests, IAssetCatalog assetCatalog, IImageMaker maker, IPauseSwitch pause, IClock clock, IAuditWriter audit, ITrackedLinks links, InstagramMirrorService mirror)
 {
     public const int MaxAttempts = 3;
     private const int MaxDraftsPerRun = 5;
@@ -48,7 +48,8 @@ public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductK
                     await EnsurePlanAsync(s, notes, ct); db.ChangeTracker.Clear();
                     await DraftAsync(s, notes, ct); db.ChangeTracker.Clear();
                     await ReviewPostsAsync(s, k, notes, ct); db.ChangeTracker.Clear();
-                    await ScheduleAsync(s, notes, ct);
+                    await ScheduleAsync(s, notes, ct); db.ChangeTracker.Clear();
+                    await mirror.RunAsync(s, notes, ct);
                 }
             }
         }
@@ -316,7 +317,7 @@ public static class AutopilotRegistration
 
 public static class AutopilotEndpoints
 {
-    public sealed record SettingsRequest(bool Enabled, string? Channel, string? Language, string? Goal, int? PlanDays, int? EveryDays, string? PostTimeUtc, IReadOnlyList<string>? PostTimesUtc, int? MaxPostsPerDay, int? LookaheadHours, bool? UseImages = null, bool? UseVideos = null);
+    public sealed record SettingsRequest(bool Enabled, string? Channel, string? Language, string? Goal, int? PlanDays, int? EveryDays, string? PostTimeUtc, IReadOnlyList<string>? PostTimesUtc, int? MaxPostsPerDay, int? LookaheadHours, bool? UseImages = null, bool? UseVideos = null, bool? AlsoInstagram = null);
 
     public static void Map(RouteGroupBuilder g)
     {
@@ -335,7 +336,7 @@ public static class AutopilotEndpoints
             var week = await db.Decisions.AsNoTracking().Where(d => d.ProductId == productId && d.CreatedAt >= since).GroupBy(d => d.Verdict).Select(x => new { verdict = x.Key, n = x.Count(), cost = x.Sum(y => y.CostUsd) }).ToListAsync(ct);
             return Results.Ok(new
             {
-                s.Enabled, s.Channel, s.Language, s.Goal, s.PlanDays, s.EveryDays, postTimeUtc = s.PostTimeUtc.ToString("HH:mm"), postTimesUtc = new[] { s.PostTimeUtc }.Concat(AutopilotEngine.ParseTimes(s.ExtraPostTimesUtc)).OrderBy(t => t).Select(t => t.ToString("HH:mm")), s.MaxPostsPerDay, s.LookaheadHours, s.UseImages, s.UseVideos, s.LastRunAt, s.LastRunNote,
+                s.Enabled, s.Channel, s.Language, s.Goal, s.PlanDays, s.EveryDays, postTimeUtc = s.PostTimeUtc.ToString("HH:mm"), postTimesUtc = new[] { s.PostTimeUtc }.Concat(AutopilotEngine.ParseTimes(s.ExtraPostTimesUtc)).OrderBy(t => t).Select(t => t.ToString("HH:mm")), s.MaxPostsPerDay, s.LookaheadHours, s.UseImages, s.UseVideos, s.AlsoInstagram, s.LastRunAt, s.LastRunNote,
                 needsYou, week,
                 decisions = decisions.Select(d => new { d.Id, d.ContentItemId, d.Version, d.Verdict, d.Attempt, d.Reasons, d.CostUsd, d.CreatedAt, checks = JsonSerializer.Deserialize<JsonElement>(d.ChecksJson) }),
             });
@@ -374,7 +375,7 @@ public static class AutopilotEndpoints
             var s = await db.Autopilot.FirstOrDefaultAsync(x => x.ProductId == productId, ct);
             var was = s?.Enabled ?? false;
             if (s is null) { s = new AutopilotSettings { ProductId = productId }; db.Autopilot.Add(s); }
-            s.Enabled = req.Enabled; s.Channel = channel; s.Language = language; s.Goal = goal; s.PlanDays = planDays; s.EveryDays = every; s.PostTimeUtc = time; s.ExtraPostTimesUtc = string.Join(",", times.Skip(1).Select(t => t.ToString("HH:mm"))); s.MaxPostsPerDay = cap; s.LookaheadHours = look; s.UseImages = req.UseImages ?? true; s.UseVideos = req.UseVideos ?? true;
+            s.Enabled = req.Enabled; s.Channel = channel; s.Language = language; s.Goal = goal; s.PlanDays = planDays; s.EveryDays = every; s.PostTimeUtc = time; s.ExtraPostTimesUtc = string.Join(",", times.Skip(1).Select(t => t.ToString("HH:mm"))); s.MaxPostsPerDay = cap; s.LookaheadHours = look; s.UseImages = req.UseImages ?? true; s.UseVideos = req.UseVideos ?? true; s.AlsoInstagram = req.AlsoInstagram ?? false;
             s.UpdatedBy = u.UserId; s.UpdatedAt = clock.UtcNow;
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry(req.Enabled ? (was ? "autopilot.updated" : "autopilot.enabled") : "autopilot.disabled", "Product", productId.ToString(), productId, goal.Length > 120 ? goal[..120] : goal, After: new { channel, planDays, every, cap, look }), ct);

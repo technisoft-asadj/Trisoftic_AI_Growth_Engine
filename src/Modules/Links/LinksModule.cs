@@ -180,6 +180,17 @@ public sealed partial class TrackedLinksService(LinksDbContext db, IConfiguratio
         throw new InvalidOperationException("Could not find a free short code.");
     }
 
+    public async Task<TrackedLink?> RetargetAsync(Guid productId, string shortUrl, string channel, string? label, CancellationToken ct = default)
+    {
+        var baseUrl = LinksModule.BaseUrl(cfg);
+        if (baseUrl is null) return null;
+        var prefix = baseUrl + "/r/";
+        if (!shortUrl.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+        var code = shortUrl[prefix.Length..].TrimEnd('.', ',', ';', '!', '?', ')');
+        var row = await db.Links.AsNoTracking().FirstOrDefaultAsync(l => l.ProductId == productId && l.Code == code, ct);
+        return row is null ? null : await CreateAsync(productId, row.Destination, channel, row.Campaign, label, ct);
+    }
+
     public async Task AttachAsync(IReadOnlyCollection<Guid> linkIds, Guid contentItemId, CancellationToken ct = default)
     {
         if (linkIds.Count == 0) return;

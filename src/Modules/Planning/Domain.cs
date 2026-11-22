@@ -112,6 +112,8 @@ public sealed class AutopilotSettings : IOrganizationScoped
     public bool UseImages { get; set; } = true;
     /// <summary>May post Reels from the product's own uploaded vertical videos.</summary>
     public bool UseVideos { get; set; } = true;
+    /// <summary>Also post each approved picture or video post to the product's connected Instagram account.</summary>
+    public bool AlsoInstagram { get; set; }
     /// <summary>How far ahead posts are written and approved.</summary>
     public int LookaheadHours { get; set; } = 72;
     public Guid? UpdatedBy { get; set; }
@@ -201,6 +203,7 @@ public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> option
     public DbSet<AutopilotSettings> Autopilot => Set<AutopilotSettings>();
     public DbSet<AutopilotDecision> Decisions => Set<AutopilotDecision>();
     public DbSet<OwnerAlert> Alerts => Set<OwnerAlert>();
+    public DbSet<InstagramMirror> Mirrors => Set<InstagramMirror>();
     public DbSet<OwnerDigest> Digests => Set<OwnerDigest>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -225,6 +228,12 @@ public sealed class PlanningDbContext(DbContextOptions<PlanningDbContext> option
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             e.HasIndex(x => new { x.PlanId, x.Position }).IsUnique();
             e.HasOne<GrowthPlan>().WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<InstagramMirror>(e =>
+        {
+            e.ToTable("instagram_mirrors"); e.HasKey(x => x.Id);
+            e.Property(x => x.Status).HasMaxLength(20); e.Property(x => x.Note).HasMaxLength(1000);
+            e.HasIndex(x => x.SourceItemId).IsUnique(); e.HasIndex(x => x.ProductId);
         });
         b.Entity<OwnerAlert>(e =>
         {

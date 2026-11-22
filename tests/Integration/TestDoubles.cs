@@ -138,7 +138,10 @@ public sealed class ScriptedPublisher : TriSoftic.GrowthEngine.Modules.Publishin
 public sealed class FakeFacebookGraph : TriSoftic.GrowthEngine.Modules.Publishing.IFacebookGraph
 {
     public bool IsConfigured => true;
-    public string AuthorizeUrl(string state) => "https://facebook.test/dialog?state=" + Uri.EscapeDataString(state);
+    public string AuthorizeUrl(string state, bool instagram = false) => "https://facebook.test/dialog?state=" + Uri.EscapeDataString(state) + (instagram ? "&instagram=1" : "");
+    public static string? InstagramUsername = "ludofight_official";
+    public Task<TriSoftic.GrowthEngine.Modules.Publishing.InstagramAccount?> GetInstagramAccountAsync(string pageId, string pageToken, CancellationToken ct)
+        => Task.FromResult<TriSoftic.GrowthEngine.Modules.Publishing.InstagramAccount?>(InstagramUsername is null ? null : new("17841400000000001", InstagramUsername));
     public Task<string> ExchangeCodeAsync(string code, CancellationToken ct) => Task.FromResult("user-token-for-" + code);
     public Task<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageInfo>> ListPagesAsync(string userToken, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageInfo>>([new("111", "Ludo Fight Official", "page-secret-token-111"), new("222", "Other Page", "page-secret-token-222")]);

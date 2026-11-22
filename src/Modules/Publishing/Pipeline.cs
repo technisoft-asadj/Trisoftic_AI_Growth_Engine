@@ -45,11 +45,11 @@ public sealed class PublishPipeline(PublishingDbContext db, IContentPublishSourc
         // Files: checked again at the last moment (a file may have been retired or its rights may have expired since approval), then opened lazily so a video is streamed.
         var assetIds = item.AssetIds ?? [];
         var media = new List<MediaFile>();
-        if (assetIds.Count > 0 || item.Format == "Story")
+        if (assetIds.Count > 0 || item.Format == "Story" || MediaRules.IsInstagram(item.Channel))
         {
             var infos = assetIds.Count == 0 ? [] : await catalog.GetAsync(assetIds, ct);
             if (assetIds.Any(i => infos.All(x => x.Id != i))) { await FailAsync(item, "An attached file no longer exists."); return; }
-            var problems = MediaRules.Validate(item.Format, infos, item.ProductId, clock.UtcNow, complete: true);
+            var problems = MediaRules.Validate(item.Format, infos, item.ProductId, clock.UtcNow, complete: true, item.Channel);
             if (problems.Count > 0) { await FailAsync(item, "The attached files cannot be sent: " + string.Join(" ", problems)); return; }
             media = [.. assetIds.Select(id => infos.First(x => x.Id == id)).Select(i => new MediaFile(i.Name, i.ContentType, i.SizeBytes, async c => await catalog.OpenAsync(i.Id, c) ?? throw new PublishException(PublishErrorKind.Permanent, $"The file '{i.Name}' is missing from storage.")))];
         }

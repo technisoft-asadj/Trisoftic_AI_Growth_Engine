@@ -19,7 +19,7 @@ namespace TriSoftic.GrowthEngine.Modules.Planning;
 /// </summary>
 public static class PlanningModule
 {
-    public static IServiceCollection AddPlanningModule(this IServiceCollection s, IConfiguration c) => s.AddModuleDbContext<PlanningDbContext>(c, PlanningDbContext.Schema).AddScoped<PlanOps>().AddScoped<HookTestService>().AddScoped<LearningService>().AddScoped<OpsService>().AddAutopilot(c);
+    public static IServiceCollection AddPlanningModule(this IServiceCollection s, IConfiguration c) => s.AddModuleDbContext<PlanningDbContext>(c, PlanningDbContext.Schema).AddScoped<PlanOps>().AddScoped<HookTestService>().AddScoped<LearningService>().AddScoped<OpsService>().AddScoped<InstagramMirrorService>().AddAutopilot(c);
 
     public sealed record CreatePlanRequest(string Name, string Goal, DateOnly StartDate, int Days, int? EveryDays, string? TimeUtc, string? Channel, string? Language, Guid? FromReviewId);
 

@@ -56,7 +56,10 @@ public static class MediaRules
     public static bool IsVideo(AssetInfo a) => a.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
     public static bool IsImage(AssetInfo a) => a.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
 
-    public static List<string> Validate(string format, IReadOnlyList<AssetInfo> assets, Guid productId, DateTimeOffset now, bool complete = true)
+    public static bool IsInstagram(string? channel) => string.Equals(channel, "Instagram", StringComparison.OrdinalIgnoreCase);
+
+    /// <param name="channel">Instagram has no text-only posts and its feed posts are pictures (a video is a Reel), so those are refused here, before approval, not at publishing time.</param>
+    public static List<string> Validate(string format, IReadOnlyList<AssetInfo> assets, Guid productId, DateTimeOffset now, bool complete = true, string? channel = null)
     {
         var e = new List<string>();
         foreach (var a in assets)
@@ -74,6 +77,8 @@ public static class MediaRules
         {
             case "Post":
                 if (images > 0 && videos > 0) e.Add("A post can carry images or a video, not both.");
+                if (IsInstagram(channel) && videos > 0) e.Add("Instagram feed posts are pictures. Post a video as a Reel.");
+                if (IsInstagram(channel) && complete && images == 0) e.Add("An Instagram post needs at least one picture: Instagram has no text-only posts.");
                 if (images > MaxImages) e.Add($"A post can carry at most {MaxImages} images.");
                 if (videos > 1) e.Add("A post can carry only one video.");
                 break;
