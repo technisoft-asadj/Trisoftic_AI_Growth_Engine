@@ -262,3 +262,8 @@ Owner decision: no waiting for approval; one AI agent approves, the whole loop r
 - Autopilot setting **Posts per day** (1 to 3) with one posting time each (UTC, HH:mm, at least 2 hours apart, also across midnight). `AutopilotSettings.ExtraPostTimesUtc` holds the times after the first; `PostTimeUtc` stays the earliest. `PUT /products/{id}/autopilot` takes `postTimesUtc` (the old single `postTimeUtc` still works) and the state returns `postTimesUtc`.
 - A plan gets one slot per time on every posting day (so 7 days at 3 a day = 21 posts; limit 31 posts per plan). The planner is told the times and that posts on one day must use different angles and openings. "Most posts per day" remains a ceiling and must be at least the number of times.
 - Existing plans are not changed; the new cadence applies to the next plan (cancel the old one to re-plan at once).
+
+## Posts per day (22 Nov 2026)
+- Autopilot setting **Posts per day** (1 to 3) with a posting time for each (UTC, at least 2 hours apart, also across midnight). A plan gets one slot per time on every posting day (`PlanSpec.MoreTimes`, `PlanLogic.SlotTimes/SlotCount/ValidateTimes`); the planner is told the times and that posts on the same day must differ in angle and opening. Stored as `AutopilotSettings.ExtraPostTimesUtc` (migration `PostsPerDay`); `PostTimeUtc` stays the earliest time.
+- "Most posts per day" remains a ceiling and must be at least the number of times; a plan is limited to 31 posts in total (3 a day gives at most 10 posting days).
+- Existing plans keep their old layout; new plans use the setting. Tests: 6 unit, 1 integration (489 in total).
