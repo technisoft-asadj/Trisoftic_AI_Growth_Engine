@@ -1,8 +1,7 @@
 using System.Net;
 using System.Text;
 using Microsoft.Extensions.Configuration;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using SkiaSharp;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 using TriSoftic.GrowthEngine.Modules.Publishing;
 
@@ -65,7 +64,7 @@ public sealed class InstagramTests
         return (new InstagramGraph(new Factory(graph), cfg, new PublicMedia(storage, cfg, new Clock(new DateTimeOffset(2026, 11, 22, 12, 0, 0, TimeSpan.Zero)))), graph, storage);
     }
 
-    private static byte[] PngBytes(int w, int h) { using var img = new Image<Rgba32>(w, h, new Rgba32(10, 120, 200, 128)); using var ms = new MemoryStream(); img.SaveAsPng(ms); return ms.ToArray(); }
+    private static byte[] PngBytes(int w, int h) { using var bmp = new SKBitmap(new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul)); bmp.Erase(new SKColor(10, 120, 200, 128)); using var img = SKImage.FromBitmap(bmp); using var data = img.Encode(SKEncodedImageFormat.Png, 100); return data.ToArray(); }
     private static MediaFile Picture(int w = 1000, int h = 1000, string name = "pic.png") { var b = PngBytes(w, h); return new MediaFile(name, "image/png", b.Length, _ => Task.FromResult<Stream>(new MemoryStream(b))); }
     private static MediaFile Video(string name = "clip.mp4", string type = "video/mp4") => new(name, type, 6, _ => Task.FromResult<Stream>(new MemoryStream([1, 2, 3, 4, 5, 6])));
     private static PostRequest Req(string text, string format, params MediaFile[] media) => new("17841400000000001", "page-token", text, media, format);
@@ -96,8 +95,8 @@ public sealed class InstagramTests
         graph.Override = c => { if (c.Path.EndsWith("/media") && c.Method == HttpMethod.Post) seen = storage.Files.Values.Single(); return null; };
         await ig.PublishAsync(Req("x", "Post", Picture(2400, 2000)), default);
         Assert.NotNull(seen); Assert.Equal([0xFF, 0xD8, 0xFF], seen!.Take(3));
-        using var img = Image.Load(seen);
-        Assert.Equal(1440, img.Width); Assert.True(img.Height <= 1440);
+        using var decoded = SKBitmap.Decode(seen);
+        Assert.Equal(1440, decoded.Width); Assert.True(decoded.Height <= 1440);
     }
 
     [Fact]

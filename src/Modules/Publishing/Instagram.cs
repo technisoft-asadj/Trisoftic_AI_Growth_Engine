@@ -5,9 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Jpeg;
-using SixLabors.ImageSharp.Processing;
+using SkiaSharp;
 using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 
 namespace TriSoftic.GrowthEngine.Modules.Publishing;
@@ -74,26 +72,32 @@ public static class InstagramImages
     public const double MinRatio = 0.8, MaxRatio = 1.91;
     public const int MaxSide = 1440;
 
+    public const long MaxInputBytes = 30_000_000;
+
     public static async Task<(MemoryStream Jpeg, int Width, int Height)> PrepareAsync(Stream input, string name, CancellationToken ct)
     {
-        Image image;
-        try { image = await Image.LoadAsync(input, ct); }
-        catch (Exception ex) when (ex is not OperationCanceledException) { throw new PublishException(PublishErrorKind.Permanent, $"'{name}' could not be read as a picture.", inner: ex); }
-        using (image)
-        {
-            var ratio = (double)image.Width / image.Height;
-            if (ratio < MinRatio || ratio > MaxRatio)
-                throw new PublishException(PublishErrorKind.Permanent, $"'{name}' is {image.Width}x{image.Height}. Instagram accepts pictures between 4:5 (tall) and 1.91:1 (wide); crop it first.");
-            image.Mutate(c =>
-            {
-                c.BackgroundColor(Color.White);   // transparent areas would otherwise turn black in a JPEG
-                if (Math.Max(image.Width, image.Height) > MaxSide) c.Resize(new ResizeOptions { Mode = ResizeMode.Max, Size = new Size(MaxSide, MaxSide) });
-            });
-            var output = new MemoryStream();
-            await image.SaveAsJpegAsync(output, new JpegEncoder { Quality = 88 }, ct);
-            output.Position = 0;
-            return (output, image.Width, image.Height);
-        }
+        using var raw = new MemoryStream();
+        await input.CopyToAsync(raw, ct);
+        if (raw.Length > MaxInputBytes) throw new PublishException(PublishErrorKind.Permanent, $"'{name}' is too large to prepare for Instagram.");
+        using var source = SKBitmap.Decode(raw.ToArray());
+        if (source is null || source.Width <= 0 || source.Height <= 0) throw new PublishException(PublishErrorKind.Permanent, $"'{name}' could not be read as a picture.");
+
+        var ratio = (double)source.Width / source.Height;
+        if (ratio < MinRatio || ratio > MaxRatio)
+            throw new PublishException(PublishErrorKind.Permanent, $"'{name}' is {source.Width}x{source.Height}. Instagram accepts pictures between 4:5 (tall) and 1.91:1 (wide); crop it first.");
+
+        var scale = Math.Max(source.Width, source.Height) > MaxSide ? (double)MaxSide / Math.Max(source.Width, source.Height) : 1.0;
+        var width = Math.Max(1, (int)Math.Round(source.Width * scale)); var height = Math.Max(1, (int)Math.Round(source.Height * scale));
+        using var surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Opaque));
+        surface.Canvas.Clear(SKColors.White);   // transparent areas would otherwise turn black in a JPEG
+        using (var image = SKImage.FromBitmap(source))
+            surface.Canvas.DrawImage(image, new SKRect(0, 0, width, height), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+        using var snapshot = surface.Snapshot();
+        using var jpeg = snapshot.Encode(SKEncodedImageFormat.Jpeg, 88) ?? throw new PublishException(PublishErrorKind.Permanent, $"'{name}' could not be converted to JPEG.");
+        var output = new MemoryStream();
+        jpeg.SaveTo(output);
+        output.Position = 0;
+        return (output, width, height);
     }
 }
 
