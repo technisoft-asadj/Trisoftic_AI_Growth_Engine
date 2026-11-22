@@ -134,4 +134,22 @@ public sealed class AssetTests(TestHost host)
         Assert.Equal(0, (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/products/{pid}/assets", Json)).GetArrayLength());
         Assert.Equal(1, (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/products/{pid}/assets?includeRetired=true", Json)).GetArrayLength());
     }
+
+    [Fact]
+    public async Task The_owner_can_change_the_usage_rights_of_an_uploaded_file_and_it_is_audited()
+    {
+        var admin = await host.LoginAdminAsync();
+        var pid = await ProductAsync(admin);
+        var up = await admin.PostAsync($"/api/v1/products/{pid}/assets", Form(Png, "own screenshot.png", rights: "Unknown"));
+        var id = (await up.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PutAsJsonAsync($"/api/v1/assets/{id}/rights", new { rights = "Everything" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PutAsJsonAsync($"/api/v1/assets/{id}/rights", new { rights = "Unrestricted", rightsExpiresAt = "2001-01-01T00:00:00Z" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await admin.PutAsJsonAsync($"/api/v1/assets/{id}/rights", new { rights = "Unrestricted", owner = "Trisoftic", rightsNotes = "Own screenshot" })).StatusCode);
+
+        var list = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/products/{pid}/assets", Json);
+        Assert.Equal("Unrestricted", list.EnumerateArray().Single().GetProperty("rights").GetString());
+        var audit = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/governance/audit?productId={pid}", Json);
+        Assert.Contains(audit.GetProperty("items").EnumerateArray(), e => e.GetProperty("action").GetString() == "asset.rights-changed");
+    }
 }

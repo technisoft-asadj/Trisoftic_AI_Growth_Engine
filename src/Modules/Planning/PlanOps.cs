@@ -158,7 +158,8 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
     }
 
     private bool FitsReel(AssetInfo a, Guid productId) => MediaRules.IsVideo(a) && MediaRules.Validate("Reel", [a], productId, clock.UtcNow).Count == 0;
-    private bool FitsPost(AssetInfo a, Guid productId) => MediaRules.IsImage(a) && MediaRules.Validate("Post", [a], productId, clock.UtcNow).Count == 0;
+    private bool FitsPost(AssetInfo a, Guid productId) => a.ContentType is "image/jpeg" or "image/png" &&   // the formats Facebook documents for photos
+         MediaRules.Validate("Post", [a], productId, clock.UtcNow).Count == 0;
 
     /// <summary>How many uploaded vertical videos are free to become Reels.</summary>
     public async Task<int> CountFreeVideosAsync(Guid productId, CancellationToken ct) => (await FreeFilesAsync(productId, ct)).Count(a => FitsReel(a, productId));

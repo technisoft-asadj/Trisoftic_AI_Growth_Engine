@@ -212,6 +212,10 @@ function AssetsTab({ productId }: { productId: string }) {
     mutationFn: (f: FormData) => api.upload(`/api/v1/products/${productId}/assets`, f),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['assets', productId] }),
   })
+  const setRights = useMutation({
+    mutationFn: (v: { id: string; rights: string }) => api.put(`/api/v1/assets/${v.id}/rights`, { rights: v.rights }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['assets', productId] }),
+  })
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     upload.mutate(new FormData(e.currentTarget))
@@ -220,13 +224,20 @@ function AssetsTab({ productId }: { productId: string }) {
   return (
     <>
       {assets.data?.length === 0 && <p className="muted">No assets yet.</p>}
+      <p className="muted">The autopilot only uses files whose rights are Unrestricted or Licensed with limits, JPG or PNG pictures and vertical MP4 videos. Files marked Unknown are never published.</p>
+      <ErrorBox error={setRights.error} />
       <table>
         <thead><tr><th>Name</th><th>Kind</th><th>Ver</th><th>Source</th><th>Rights</th><th /></tr></thead>
         <tbody>
           {assets.data?.map((a) => (
             <tr key={a.id}>
               <td>{a.name} {a.isSynthetic && <span className="badge warn">synthetic</span>}</td>
-              <td>{a.kind}</td><td>{a.version}</td><td>{a.source}</td><td>{a.rights}</td>
+              <td>{a.kind}</td><td>{a.version}</td><td>{a.source}</td>
+              <td>{can('assets.write') && a.source !== 'AiGenerated'
+                ? <select value={a.rights} disabled={setRights.isPending} onChange={(e) => { if (e.target.value !== a.rights && window.confirm(`Set the usage rights of "${a.name}" to ${e.target.value}? Only choose Unrestricted if you own this file or have the right to publish it.`)) setRights.mutate({ id: a.id, rights: e.target.value }) }}>
+                    {['Unknown', 'InternalOnly', 'Unrestricted', 'LicensedWithLimits'].map((r) => <option key={r}>{r}</option>)}
+                  </select>
+                : a.rights}</td>
               <td><a href={`/api/v1/assets/${a.id}/content`} target="_blank" rel="noreferrer">open</a></td>
             </tr>
           ))}

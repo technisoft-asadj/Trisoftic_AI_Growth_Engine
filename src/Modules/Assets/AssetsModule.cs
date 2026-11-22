@@ -65,6 +65,24 @@ public static class AssetsModule
         g.MapPost("/products/{productId:guid}/assets", (Delegate)UploadNew).DisableAntiforgery();
         g.MapPost("/assets/{id:guid}/versions", (Delegate)UploadVersion).DisableAntiforgery();
 
+        // Changes the stated usage rights of a file already uploaded (for example "Unknown" -> "Unrestricted" once the owner confirms they own it). Only a person can do this; it is audited with the old and new values.
+        g.MapPut("/assets/{id:guid}/rights", async (Guid id, RightsRequest req, AssetsDbContext db, ICurrentUser u, IClock clock, IAuditWriter audit, CancellationToken ct) =>
+        {
+            var a = await Visible(db, u, id, Permissions.AssetsWrite, ct, track: true);
+            if (a is null) return Results.NotFound();
+            if (!Enum.TryParse<UsageRights>(req.Rights, true, out var rights)) return Results.Problem(statusCode: 400, title: "rights must be one of " + string.Join(", ", Enum.GetNames<UsageRights>()));
+            if (a.Source == AssetSource.AiGenerated && rights != UsageRights.Unrestricted) return Results.Problem(statusCode: 409, title: "AI-made pictures are always unrestricted.");
+            if (req.RightsExpiresAt is { } x && x <= clock.UtcNow) return Results.Problem(statusCode: 400, title: "The expiry date must be in the future.");
+            var before = new { a.Rights, a.OwnerName, a.RightsNotes, a.RightsExpiresAt };
+            a.Rights = rights;
+            if (req.Owner is not null) a.OwnerName = req.Owner.Trim() is { Length: > 0 } o ? (o.Length > 200 ? o[..200] : o) : null;
+            if (req.RightsNotes is not null) a.RightsNotes = req.RightsNotes.Trim() is { Length: > 0 } n ? (n.Length > 1000 ? n[..1000] : n) : null;
+            a.RightsExpiresAt = req.RightsExpiresAt;
+            await db.SaveChangesAsync(ct);
+            await audit.WriteAsync(new AuditEntry("asset.rights-changed", "Asset", a.GroupId.ToString(), a.ProductId, a.Name, Before: before, After: new { a.Rights, a.OwnerName, a.RightsNotes, a.RightsExpiresAt }), ct);
+            return Results.NoContent();
+        });
+
         g.MapPost("/assets/{id:guid}/retire/{retired:bool}", async (Guid id, bool retired, AssetsDbContext db, ICurrentUser u, IAuditWriter audit, CancellationToken ct) =>
         {
             var a = await Visible(db, u, id, Permissions.AssetsWrite, ct, track: true);
@@ -110,6 +128,8 @@ public static class AssetsModule
         await audit.WriteAsync(new AuditEntry("asset.version-uploaded", "Asset", current.GroupId.ToString(), current.ProductId, res.Asset!.Name, After: new { res.Asset.Version, res.Asset.Sha256 }), ct);
         return Results.Created($"/api/v1/assets/{res.Asset.Id}", ToDto(res.Asset));
     }
+
+    public sealed record RightsRequest(string? Rights, string? Owner, string? RightsNotes, DateTimeOffset? RightsExpiresAt);
 
     private sealed record UploadForm(IFormFile? File, AssetKind Kind, AssetSource Source, UsageRights Rights, string? Owner, string? Notes, DateTimeOffset? Expires, bool Synthetic, string? Error);
 
