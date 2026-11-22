@@ -20,7 +20,7 @@ public sealed record AutopilotReport(IReadOnlyList<string> Notes);
 /// when a plan ends. It only touches plans it created itself. Anything the reviewer is unsure about, or that keeps failing, is left for a person (the "Needs you" list).
 /// </summary>
 public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductKnowledge knowledge, IAiGenerator ai, IContentCatalog catalog, IContentPublishSource source,
-    IAgentApprovals agent, HookTestService tests, IAssetCatalog assetCatalog, IImageMaker maker, IPauseSwitch pause, IClock clock, IAuditWriter audit)
+    IAgentApprovals agent, HookTestService tests, IAssetCatalog assetCatalog, IImageMaker maker, IPauseSwitch pause, IClock clock, IAuditWriter audit, ITrackedLinks links)
 {
     public const int MaxAttempts = 3;
     private const int MaxDraftsPerRun = 5;
@@ -121,7 +121,7 @@ public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductK
             if (c is null || c.Status != "InReview" || c.CurrentVersion != p.SubjectVersion) continue;
             var others = recent.Where(b => b != c.Body).ToList();
 
-            var gates = AutopilotGates.Check(c.Body, k, others);
+            var gates = AutopilotGates.Check(c.Body, k, others, await links.OwnShortUrlsAsync(s.ProductId, AutopilotGates.UrlsIn(c.Body), ct));
             var media = c.AssetIds is { Count: > 0 } ids ? await assetCatalog.GetAsync(ids, ct) : [];
             gates.AddRange(AutopilotGates.CheckMedia(c.Format, media, s.ProductId, clock.UtcNow, c.Body, slot.ImageBrief, maker.CheckBrief));
             var mediaNote = media.Count == 0 ? null : string.Join("; ", media.Select(m => m.IsSynthetic

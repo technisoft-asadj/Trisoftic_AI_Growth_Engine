@@ -58,6 +58,9 @@
   <Folder Name="/src/Modules/Planning/">
     <Project Path="src/Modules/Planning/TriSoftic.GrowthEngine.Modules.Planning.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Links/">
+    <Project Path="src/Modules/Links/TriSoftic.GrowthEngine.Modules.Links.csproj" />
+  </Folder>
   <Folder Name="/tests/" />
   <Folder Name="/tests/Architecture/">
     <Project Path="tests/Architecture/TriSoftic.GrowthEngine.Tests.Architecture.csproj" />

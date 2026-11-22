@@ -87,7 +87,7 @@ public static class OwnerAlerts
     private static string Short(string v, int n) => v.Length <= n ? v : v[..n];
 }
 
-public sealed record DigestPost(string Title, DateTimeOffset PublishedAt, int? Reactions, int? Comments, int? Shares, long? Views, long? Reach, string? Url)
+public sealed record DigestPost(string Title, DateTimeOffset PublishedAt, int? Reactions, int? Comments, int? Shares, long? Views, long? Reach, string? Url, int? LinkClicks = null)
 {
     /// <summary>Reactions, comments and shares added up. Null when the network gave none of them (never zero for "unknown").</summary>
     public int? Engagements => Reactions is null && Comments is null && Shares is null ? null : (Reactions ?? 0) + (Comments ?? 0) + (Shares ?? 0);
@@ -95,7 +95,7 @@ public sealed record DigestPost(string Title, DateTimeOffset PublishedAt, int? R
 
 public sealed record DigestInput(
     DateTimeOffset From, DateTimeOffset To, IReadOnlyList<DigestPost> Posts, int Approved, int Rejected, int Escalated, decimal ReviewCostUsd,
-    IReadOnlyList<string> Supported, IReadOnlyList<string> Contradicted, int OpenLearnings, int NeedsYou, IReadOnlyList<string> Alerts, decimal AiMonthUsd, decimal AiMonthBudgetUsd);
+    IReadOnlyList<string> Supported, IReadOnlyList<string> Contradicted, int OpenLearnings, int NeedsYou, IReadOnlyList<string> Alerts, decimal AiMonthUsd, decimal AiMonthBudgetUsd, int? LinkClicks = null, int? LinkVisitors = null);
 
 /// <summary>Builds the weekly digest from recorded figures. No AI call, so it costs nothing and cannot invent anything.</summary>
 public static class DigestWriter
@@ -113,6 +113,8 @@ public static class DigestWriter
             sb.AppendLine($"  - {p.PublishedAt:ddd d MMM}: {p.Title}: {Figures(p)}");
         var best = d.Posts.Where(p => p.Engagements is not null).OrderByDescending(p => p.Engagements).FirstOrDefault();
         if (best is not null && measured >= 2) sb.AppendLine($"Strongest: \"{best.Title}\" with {best.Engagements} reactions, comments and shares together.");
+        if (d.LinkClicks is { } lc)
+            sb.AppendLine($"Link clicks this week: {lc}" + (d.LinkVisitors is { } lv && lc > 0 ? $" (about {lv} different visitors)" : "") + ". A click is someone opening the link in a post; installs cannot be measured.");
         sb.AppendLine();
         var checks = d.Approved + d.Rejected + d.Escalated;
         sb.AppendLine(checks == 0 ? "The AI reviewer had nothing to check." : $"The AI reviewer checked {checks} post(s): {d.Approved} approved, {d.Rejected} sent back for a rewrite, {d.Escalated} left for you. Review cost this week: ${d.ReviewCostUsd:F2}.");
@@ -137,13 +139,13 @@ public static class DigestWriter
     private static string Figures(DigestPost p)
     {
         string F(string name, long? v) => v is null ? $"{name} not reported" : $"{v} {name}";
-        return $"{F("reactions", p.Reactions)}, {F("comments", p.Comments)}, {F("shares", p.Shares)}" + (p.Views is null ? "" : $", {p.Views} views");
+        return $"{F("reactions", p.Reactions)}, {F("comments", p.Comments)}, {F("shares", p.Shares)}" + (p.Views is null ? "" : $", {p.Views} views") + (p.LinkClicks is { } c ? $", {c} link click(s)" : "");
     }
 }
 
 /// <summary>Checks for problems and writes the weekly digest. Runs after each autopilot pass, and on request.</summary>
 public sealed class OpsService(PlanningDbContext db, IChannelHealth channels, IAiSpendReader spend, IContentCatalog catalog, IContentPublishSource source, IContentPlanner content,
-    IPostPerformanceReader perf, IMessageOutbox outbox, IConfiguration cfg, IClock clock)
+    IPostPerformanceReader perf, IMessageOutbox outbox, IConfiguration cfg, IClock clock, ITrackedLinks links)
 {
     public const int DigestEveryDays = 7;
 
@@ -201,10 +203,11 @@ public sealed class OpsService(PlanningDbContext db, IChannelHealth channels, IA
         var ids = published.Select(p => p.ItemId).ToList();
         var titles = (await content.GetStatusesAsync(ids, ct)).ToDictionary(x => x.ItemId, x => x.Title);
         var figures = (await perf.GetAsync(ids, ct)).ToDictionary(x => x.ContentItemId);
+        var clicks = await links.ClicksByContentAsync(ids, from, ct);
         var posts = published.Select(p =>
         {
             figures.TryGetValue(p.ItemId, out var f);
-            return new DigestPost(titles.GetValueOrDefault(p.ItemId) ?? "Post", p.PublishedAt, f?.Reactions, f?.Comments, f?.Shares, f?.Views, f?.Reach, f?.Url);
+            return new DigestPost(titles.GetValueOrDefault(p.ItemId) ?? "Post", p.PublishedAt, f?.Reactions, f?.Comments, f?.Shares, f?.Views, f?.Reach, f?.Url, clicks.TryGetValue(p.ItemId, out var lk) ? lk.Clicks : null);
         }).ToList();
 
         var decisions = await db.Decisions.AsNoTracking().Where(d => d.ProductId == productId && d.CreatedAt >= from && d.CreatedAt <= to).ToListAsync(ct);
@@ -214,7 +217,8 @@ public sealed class OpsService(PlanningDbContext db, IChannelHealth channels, IA
         var sp = await spend.GetAsync(productId, ct);
         var input = new DigestInput(from, to, posts, decisions.Count(d => d.Verdict == "Approved"), decisions.Count(d => d.Verdict == "Rejected"), decisions.Count(d => d.Verdict == "Escalated"),
             decisions.Sum(d => d.CostUsd), week.Where(l => l.Status == LearningStatus.Supported).Select(l => l.Statement).ToList(), week.Where(l => l.Status == LearningStatus.Contradicted).Select(l => l.Statement).ToList(),
-            learnings.Count(l => l.Status == LearningStatus.Open), await NeedsYouAsync(productId, ct), alerts, sp.ProductUsd, sp.ProductBudgetUsd);
+            learnings.Count(l => l.Status == LearningStatus.Open), await NeedsYouAsync(productId, ct), alerts, sp.ProductUsd, sp.ProductBudgetUsd,
+            clicks.Count == 0 ? null : clicks.Values.Sum(x => x.Clicks), clicks.Count == 0 ? null : clicks.Values.Sum(x => x.Unique));
 
         var d = new OwnerDigest { ProductId = productId, PeriodStart = from, PeriodEnd = to, Subject = DigestWriter.Subject(input), Body = DigestWriter.Write(input), CreatedAt = clock.UtcNow };
         db.Digests.Add(d);

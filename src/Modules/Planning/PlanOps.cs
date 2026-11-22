@@ -29,7 +29,7 @@ public sealed record ScheduleOutcome(int Scheduled, IReadOnlyList<(int Position,
 /// Permission checks belong to the caller.
 /// </summary>
 public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, IAiGenerator ai, IContentCatalog catalog, IPostPerformanceReader perf, IConfiguration cfg,
-    IContentDrafter drafter, IContentPlanner content, HookTestService tests, LearningService register, IAssetCatalog assets, IImageMaker maker, IClock clock, IAuditWriter audit)
+    IContentDrafter drafter, IContentPlanner content, HookTestService tests, LearningService register, IAssetCatalog assets, IImageMaker maker, IClock clock, IAuditWriter audit, ITrackedLinks links)
 {
     private static readonly Regex Placeholder = new(@"\[[^\]\r\n]{2,60}\]", RegexOptions.Compiled);
     private const int AiAttempts = 2;
@@ -131,7 +131,10 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
             var ph = Placeholder.Match(d.Body);
             if (ph.Success) return Op<DraftSlotResult>.Fail(new OpError(422, $"The draft contains a placeholder ({ph.Value}) because the profile lacks that information. Add it to the product profile (for example the store link as a fact), approve the profile, then try again."));
 
-            var itemId = await content.CreateAsync(new NewContent(plan.ProductId, $"{plan.Name} · Post {slot.Position}: {slot.Angle}", plan.Channel, media.Format, plan.Language, d.Body, d.DraftId, media.Assets, slot.HookType), ct);
+            // the product's own links in the text become tracked short links before the text is approved, so the approved text is exactly what goes out
+            var (text, linkIds) = await TrackLinksAsync(plan, slot.Position, d.Body, ct);
+            var itemId = await content.CreateAsync(new NewContent(plan.ProductId, $"{plan.Name} · Post {slot.Position}: {slot.Angle}", plan.Channel, media.Format, plan.Language, text, d.DraftId, media.Assets, slot.HookType), ct);
+            await links.AttachAsync(linkIds, itemId, ct);
             var submitted = await content.SubmitAsync(itemId, ct);
             await db.Slots.Where(s => s.Id == slotId).ExecuteUpdateAsync(x => x.SetProperty(s => s.Status, SlotStatus.Drafted).SetProperty(s => s.ContentItemId, itemId).SetProperty(s => s.DraftedAt, clock.UtcNow).SetProperty(s => s.Attempts, s => s.Attempts + 1), ct);
             done = true;
@@ -142,6 +145,29 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
         {
             if (!done) await db.Slots.Where(s => s.Id == slotId && s.Status == SlotStatus.Drafting).ExecuteUpdateAsync(x => x.SetProperty(s => s.Status, SlotStatus.Planned), CancellationToken.None);
         }
+    }
+
+    /// <summary>
+    /// Replaces each address in the text that comes from the verified profile (the store page) with a tracked short link. Anything else is left alone.
+    /// If links cannot be made (no public address configured, or an error), the text keeps its original addresses: tracking never blocks a post.
+    /// </summary>
+    private async Task<(string Text, List<Guid> LinkIds)> TrackLinksAsync(GrowthPlan plan, int position, string body, CancellationToken ct)
+    {
+        var ids = new List<Guid>();
+        try
+        {
+            var k = await knowledge.GetApprovedAsync(plan.ProductId, ct);
+            if (k is null) return (body, ids);
+            var own = AutopilotGates.ProfileUrls(k);
+            foreach (var url in AutopilotGates.UrlsIn(body).Where(own.Contains).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var made = await links.CreateAsync(plan.ProductId, url, plan.Channel, k.ProductName, $"{plan.Name} · post {position}", ct);
+                if (made is null) continue;
+                body = body.Replace(url, made.ShortUrl, StringComparison.OrdinalIgnoreCase); ids.Add(made.Id);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { /* keep the original addresses */ }
+        return (body, ids);
     }
 
     // ---------- media ----------

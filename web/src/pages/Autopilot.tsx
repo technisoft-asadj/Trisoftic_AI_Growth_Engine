@@ -121,6 +121,8 @@ function Panel({ pid }: { pid: string }) {
 
       <OwnerOps pid={pid} />
 
+      <LinkClicks pid={pid} />
+
       <Learnings pid={pid} />
 
       <div className="card">
@@ -207,6 +209,63 @@ function OwnerOps({ pid }: { pid: string }) {
         </details>
       ))}
       {err(check.error ?? digest.error) && <p className="error" role="alert">{err(check.error ?? digest.error)}</p>}
+    </div>
+  )
+}
+
+interface LinkRowData { id: string; code: string; shortUrl?: string | null; destination: string; label?: string | null; channel: string; contentItemId?: string | null; createdAt: string; clicks: number; unique: number; lastClickAt?: string | null }
+interface LinkReport { days: number; totalClicks: number; totalUnique: number; note: string; byPost: { contentItemId: string; clicks: number; unique: number; lastClickAt?: string | null; links: LinkRowData[] }[]; byDay: { day: string; clicks: number }[]; loose: LinkRowData[] }
+
+/** Clicks on the short links in posts, per post. A click is someone opening the link; this is not an install count. */
+function LinkClicks({ pid }: { pid: string }) {
+  const qc = useQueryClient()
+  const [days, setDays] = useState(30)
+  const q = useQuery({ queryKey: ['links', pid, days], queryFn: () => api.get<LinkReport>(`/api/v1/products/${pid}/links/report?days=${days}`), refetchInterval: 60000 })
+  const titles = useQuery({ queryKey: ['link-titles', pid], queryFn: () => api.get<{ id: string; title: string; status: string }[]>(`/api/v1/content?productId=${pid}&take=200`) })
+  const title = (id: string) => titles.data?.find((c) => c.id === id)?.title ?? 'Post'
+  const [url, setUrl] = useState(''); const [label, setLabel] = useState(''); const [channel, setChannel] = useState('facebook')
+  const make = useMutation({
+    mutationFn: () => api.post<{ shortUrl: string }>(`/api/v1/products/${pid}/links`, { url, label: label || null, channel }),
+    onSuccess: () => { setUrl(''); setLabel(''); void qc.invalidateQueries({ queryKey: ['links', pid] }) },
+  })
+  const d = q.data
+  return (
+    <div className="card">
+      <h3>Link clicks</h3>
+      <p className="muted">The autopilot swaps the store link in each post for a short link that counts clicks and sends people on to the store page with tracking tags. {d?.note}</p>
+      <label>Period <select value={days} onChange={(e) => setDays(Number(e.target.value))}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select></label>
+      {d && <p><b>{d.totalClicks}</b> click(s)<span className="muted"> from about {d.totalUnique} visitor(s) in the last {d.days} days</span></p>}
+      {d && d.byPost.length === 0 && <p className="muted">No posts with short links yet. New posts written by the autopilot carry them.</p>}
+      {d && d.byPost.length > 0 && (
+        <table>
+          <thead><tr><th>Post</th><th>Clicks</th><th>Visitors</th><th>Last click</th><th>Link</th></tr></thead>
+          <tbody>
+            {d.byPost.map((p) => (
+              <tr key={p.contentItemId}>
+                <td>{title(p.contentItemId)}</td><td>{p.clicks}</td><td>{p.unique}</td>
+                <td>{p.lastClickAt ? new Date(p.lastClickAt).toLocaleString() : '-'}</td>
+                <td>{p.links[0]?.shortUrl && <a href={p.links[0].shortUrl} target="_blank" rel="noreferrer">{p.links[0].shortUrl.replace('https://', '')}</a>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <h4>Make a link for somewhere else</h4>
+      <p className="muted">For a bio, a message, a flyer or a post you write yourself. It counts clicks the same way.</p>
+      <form className="row" onSubmit={(e: FormEvent) => { e.preventDefault(); make.mutate() }}>
+        <label style={{ flex: 2 }}>Address<input type="url" required value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://play.google.com/store/apps/details?id=..." /></label>
+        <label>Where it will be shared<input value={channel} onChange={(e) => setChannel(e.target.value)} /></label>
+        <label>Note<input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Instagram bio" /></label>
+        <button type="submit" className="secondary" disabled={make.isPending || url.length < 8}>Make link</button>
+      </form>
+      {make.data && <p>Your link: <b>{make.data.shortUrl}</b></p>}
+      {d && d.loose.length > 0 && (
+        <table>
+          <thead><tr><th>Note</th><th>Link</th><th>Clicks</th></tr></thead>
+          <tbody>{d.loose.map((l) => <tr key={l.id}><td>{l.label || l.channel}</td><td>{l.shortUrl}</td><td>{l.clicks}</td></tr>)}</tbody>
+        </table>
+      )}
+      {err(make.error) && <p className="error" role="alert">{err(make.error)}</p>}
     </div>
   )
 }

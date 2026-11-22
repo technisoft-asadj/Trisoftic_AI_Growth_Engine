@@ -53,7 +53,16 @@ public static class AutopilotGates
         return g;
     }
 
-    public static List<GateResult> Check(string body, ApprovedKnowledge k, IReadOnlyList<string> recentBodies)
+    /// <param name="ownShortUrls">Short links of this product (made while drafting). They count as the product's own links because each one leads to an address from the verified profile.</param>
+    /// <summary>Every address in the verified profile. Only these may be turned into tracked short links.</summary>
+    public static HashSet<string> ProfileUrls(ApprovedKnowledge k) =>
+        k.Facts.Select(f => f.Text).Concat(k.Claims.Where(c => !c.Prohibited).Select(c => c.Text)).Append(k.Summary)
+            .SelectMany(t => Url.Matches(t ?? "").Select(m => m.Value.TrimEnd('.', ',', ';'))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The addresses in a text, as the checks read them.</summary>
+    public static List<string> UrlsIn(string text) => [.. Url.Matches(text ?? "").Select(m => m.Value.TrimEnd('.', ',', ';', '!', '?'))];
+
+    public static List<GateResult> Check(string body, ApprovedKnowledge k, IReadOnlyList<string> recentBodies, IReadOnlySet<string>? ownShortUrls = null)
     {
         var g = new List<GateResult>();
         void Add(string name, bool ok, string detail) => g.Add(new GateResult(name, ok, ok ? "ok" : detail));
@@ -78,6 +87,7 @@ public static class AutopilotGates
         Add("figures come from the profile", bad.Count == 0, "States figures the verified profile does not contain: " + string.Join(", ", bad) + ".");
 
         var known = profileTexts.SelectMany(t => Url.Matches(t).Select(m => m.Value.TrimEnd('.', ',', ';'))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (ownShortUrls is not null) known.UnionWith(ownShortUrls);
         var foreign = Url.Matches(text).Select(m => m.Value.TrimEnd('.', ',', ';', '!', '?')).FirstOrDefault(u => !known.Contains(u));
         Add("links are the product's own", foreign is null, $"Contains a link that is not in the verified profile: {foreign}.");
 

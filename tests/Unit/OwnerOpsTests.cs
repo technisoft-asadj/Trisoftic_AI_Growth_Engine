@@ -93,4 +93,17 @@ public sealed class OwnerOpsTests
         var two = new[] { new DigestPost("A", Now.AddDays(-1), 4, 0, 0, null, null, null), new DigestPost("B", Now.AddDays(-2), 9, 1, 0, null, null, null) };
         Assert.Contains("Strongest: \"B\" with 10", DigestWriter.Write(new(Now.AddDays(-7), Now, two, 0, 0, 0, 0m, [], [], 0, 0, [], 0m, 20m)));
     }
+
+    [Fact]
+    public void The_digest_reports_link_clicks_as_clicks_and_never_as_installs()
+    {
+        var posts = new[] { new DigestPost("Offline pharmacy POS", Now.AddDays(-3), 8, 2, 1, null, null, null, LinkClicks: 14), new DigestPost("Closing time rush", Now.AddDays(-1), null, null, null, null, null, null, LinkClicks: 0) };
+        var text = DigestWriter.Write(new(Now.AddDays(-7), Now, posts, 0, 0, 0, 0m, [], [], 0, 0, [], 0m, 20m, LinkClicks: 14, LinkVisitors: 11));
+        Assert.Contains("14 link click(s)", text); Assert.Contains("0 link click(s)", text);
+        Assert.Contains("Link clicks this week: 14 (about 11 different visitors)", text);
+        Assert.Contains("installs cannot be measured", text);
+        Assert.DoesNotContain("installs:", text);
+        var none = DigestWriter.Write(new(Now.AddDays(-7), Now, [], 0, 0, 0, 0m, [], [], 0, 0, [], 0m, 20m));
+        Assert.DoesNotContain("Link clicks", none);   // no links, no line
+    }
 }
