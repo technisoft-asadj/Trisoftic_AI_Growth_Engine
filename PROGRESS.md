@@ -257,3 +257,8 @@ Owner decision: no waiting for approval; one AI agent approves, the whole loop r
 - `PUT /assets/{id}/rights` (assets.write): change rights, owner, notes and expiry of an uploaded file. Audited (`asset.rights-changed`, old and new values). AI-made pictures stay Unrestricted. The Assets tab has a rights selector with a confirmation. Needed because rights could previously be set only at upload.
 - The autopilot's own-picture choice now accepts only image/jpeg and image/png (the formats Facebook documents for photos); WebP files are skipped and an AI cartoon or text is used instead.
 - Found: Ludo Fight's older plan (created before the media feature) was text-only, so it was cancelled and re-planned with pictures on 22 Nov. Trisoftic POS post 1 went out text-only although planned as image; cause not yet found.
+
+## Posts per day (22 Nov 2026)
+- Autopilot setting **Posts per day** (1 to 3) with one posting time each (UTC, HH:mm, at least 2 hours apart, also across midnight). `AutopilotSettings.ExtraPostTimesUtc` holds the times after the first; `PostTimeUtc` stays the earliest. `PUT /products/{id}/autopilot` takes `postTimesUtc` (the old single `postTimeUtc` still works) and the state returns `postTimesUtc`.
+- A plan gets one slot per time on every posting day (so 7 days at 3 a day = 21 posts; limit 31 posts per plan). The planner is told the times and that posts on one day must use different angles and openings. "Most posts per day" remains a ceiling and must be at least the number of times.
+- Existing plans are not changed; the new cadence applies to the next plan (cancel the old one to re-plan at once).

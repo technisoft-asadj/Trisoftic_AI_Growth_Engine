@@ -9,7 +9,7 @@ interface Product { id: string; name: string; isArchived: boolean }
 interface Check { name: string; passed: boolean; detail: string }
 interface Decision { id: string; contentItemId?: string; version: number; verdict: string; attempt: number; reasons: string; costUsd: number; createdAt: string; checks: Check[] }
 interface State {
-  enabled: boolean; channel: string; language?: string | null; goal: string; planDays: number; everyDays: number; postTimeUtc: string; maxPostsPerDay: number; lookaheadHours: number; useImages: boolean; useVideos: boolean
+  enabled: boolean; channel: string; language?: string | null; goal: string; planDays: number; everyDays: number; postTimeUtc: string; postTimesUtc?: string[]; maxPostsPerDay: number; lookaheadHours: number; useImages: boolean; useVideos: boolean
   lastRunAt?: string | null; lastRunNote?: string | null
   needsYou: { contentItemId: string; reasons: string; createdAt: string; title: string }[]
   week: { verdict: string; n: number; cost: number }[]
@@ -38,18 +38,24 @@ export function AutopilotPage() {
 function Panel({ pid }: { pid: string }) {
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['autopilot', pid], queryFn: () => api.get<State>(`/api/v1/products/${pid}/autopilot`), refetchInterval: 30000 })
-  const [f, setF] = useState({ goal: '', channel: 'Facebook', language: '', planDays: 7, everyDays: 1, postTimeUtc: '13:00', maxPostsPerDay: 2, lookaheadHours: 72, useImages: true, useVideos: true })
+  const [f, setF] = useState({ goal: '', channel: 'Facebook', language: '', planDays: 7, everyDays: 1, postTimesUtc: ['13:00'], maxPostsPerDay: 2, lookaheadHours: 72, useImages: true, useVideos: true })
   const [loaded, setLoaded] = useState(false)
   useEffect(() => {
     if (q.data && !loaded) {
       setLoaded(true)
-      setF({ goal: q.data.goal, channel: q.data.channel, language: q.data.language ?? '', planDays: q.data.planDays, everyDays: q.data.everyDays, postTimeUtc: q.data.postTimeUtc, maxPostsPerDay: q.data.maxPostsPerDay, lookaheadHours: q.data.lookaheadHours, useImages: q.data.useImages, useVideos: q.data.useVideos })
+      setF({ goal: q.data.goal, channel: q.data.channel, language: q.data.language ?? '', planDays: q.data.planDays, everyDays: q.data.everyDays, postTimesUtc: q.data.postTimesUtc?.length ? q.data.postTimesUtc : [q.data.postTimeUtc], maxPostsPerDay: q.data.maxPostsPerDay, lookaheadHours: q.data.lookaheadHours, useImages: q.data.useImages, useVideos: q.data.useVideos })
     }
   }, [q.data, loaded])
   const save = useMutation({
     mutationFn: (enabled: boolean) => api.put(`/api/v1/products/${pid}/autopilot`, { enabled, ...f, language: f.language || null }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['autopilot', pid] }),
   })
+  // changing the count keeps the first time and spreads the others: 5 hours apart for three posts, 6 for two
+  const setTimes = (count: number) => {
+    const first = f.postTimesUtc[0] || '13:00'; const [h, m] = first.split(':').map(Number)
+    const at = (plus: number) => `${String((h + plus) % 24).padStart(2, '0')}:${String(m || 0).padStart(2, '0')}`
+    setF({ ...f, postTimesUtc: count === 1 ? [first] : count === 2 ? [first, at(6)] : [first, at(5), at(10)], maxPostsPerDay: Math.max(f.maxPostsPerDay, count) })
+  }
   const run = useMutation({ mutationFn: () => api.post<{ notes: string[] }>(`/api/v1/products/${pid}/autopilot/run`), onSuccess: () => void qc.invalidateQueries({ queryKey: ['autopilot', pid] }) })
   const [open, setOpen] = useState<string | null>(null)
   const d = q.data
@@ -97,10 +103,13 @@ function Panel({ pid }: { pid: string }) {
         <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
           <label>Channel<input value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value })} /></label>
           <label>Language<input value={f.language} onChange={(e) => setF({ ...f, language: e.target.value })} placeholder="en" /></label>
-          <label>Post time (UTC)<input value={f.postTimeUtc} onChange={(e) => setF({ ...f, postTimeUtc: e.target.value })} /></label>
+          <label>Posts per day<select value={f.postTimesUtc.length} onChange={(e) => setTimes(Number(e.target.value))}><option value={1}>1</option><option value={2}>2</option><option value={3}>3</option></select></label>
+          {f.postTimesUtc.map((t, i) => (
+            <label key={i}>Time {f.postTimesUtc.length > 1 ? i + 1 : ''} (UTC)<input type="time" value={t} onChange={(e) => setF({ ...f, postTimesUtc: f.postTimesUtc.map((x, j) => (j === i ? e.target.value : x)) })} /></label>
+          ))}
           <label>Post every (days)<input type="number" min={1} max={7} value={f.everyDays} onChange={(e) => setF({ ...f, everyDays: Number(e.target.value) })} /></label>
           <label>Plan length (days)<input type="number" min={3} max={31} value={f.planDays} onChange={(e) => setF({ ...f, planDays: Number(e.target.value) })} /></label>
-          <label>Most posts per day<input type="number" min={1} max={5} value={f.maxPostsPerDay} onChange={(e) => setF({ ...f, maxPostsPerDay: Number(e.target.value) })} /></label>
+          <label title="A ceiling, not a target: the number of posts per day comes from Posts per day">Most posts per day (ceiling)<input type="number" min={1} max={5} value={f.maxPostsPerDay} onChange={(e) => setF({ ...f, maxPostsPerDay: Number(e.target.value) })} /></label>
           <label>Write ahead (hours)<input type="number" min={24} max={168} value={f.lookaheadHours} onChange={(e) => setF({ ...f, lookaheadHours: Number(e.target.value) })} /></label>
         </div>
         <label><input type="checkbox" checked={f.useImages} onChange={(e) => setF({ ...f, useImages: e.target.checked })} /> Add pictures to posts when they help: your own uploaded pictures first, then AI cartoon pictures (about $0.04 each, within the monthly limit)</label>

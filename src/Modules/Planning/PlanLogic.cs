@@ -6,7 +6,8 @@ using TriSoftic.GrowthEngine.BuildingBlocks.Abstractions;
 
 namespace TriSoftic.GrowthEngine.Modules.Planning;
 
-public sealed record PlanSpec(string Name, string Goal, string Channel, string? Language, DateOnly StartDate, int Days, int EveryDays, TimeOnly TimeUtc);
+/// <summary>MoreTimes are extra posting times on each posting day (so a day can carry up to three posts), in addition to TimeUtc.</summary>
+public sealed record PlanSpec(string Name, string Goal, string Channel, string? Language, DateOnly StartDate, int Days, int EveryDays, TimeOnly TimeUtc, IReadOnlyList<TimeOnly>? MoreTimes = null);
 
 public sealed class Measure { public string Name { get; set; } = ""; public string Why { get; set; } = ""; }
 public sealed class PlannedPost { public string Angle { get; set; } = ""; public string Brief { get; set; } = ""; public string? HookType { get; set; } public string? Visual { get; set; } public string? ImageBrief { get; set; } public string? Tests { get; set; } }
@@ -58,7 +59,25 @@ public static class PlanLogic
     public const int MaxSlots = 31;
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
 
-    public static int SlotCount(int days, int everyDays) => everyDays <= 0 ? 0 : (days + everyDays - 1) / everyDays;
+    public const int MaxPostsPerDay = 3;
+    public const int MinHoursBetweenPosts = 2;
+
+    public static int PerDay(PlanSpec s) => new[] { s.TimeUtc }.Concat(s.MoreTimes ?? []).Distinct().Count();
+    public static int SlotCount(int days, int everyDays, int perDay = 1) => everyDays <= 0 ? 0 : (days + everyDays - 1) / everyDays * Math.Max(1, perDay);
+
+    /// <summary>Checks a list of posting times (HH:mm, UTC) for one day: 1 to 3, no repeats, at least two hours apart (also across midnight).</summary>
+    public static List<string> ValidateTimes(IReadOnlyList<TimeOnly> times)
+    {
+        var e = new List<string>();
+        if (times.Count is < 1 or > MaxPostsPerDay) { e.Add($"Choose 1 to {MaxPostsPerDay} posting times."); return e; }
+        var mins = times.Select(t => t.Hour * 60 + t.Minute).OrderBy(x => x).ToList();
+        for (var i = 0; i < mins.Count; i++)
+        {
+            var next = i + 1 < mins.Count ? mins[i + 1] : mins[0] + 24 * 60;
+            if (mins.Count > 1 && next - mins[i] < MinHoursBetweenPosts * 60) { e.Add($"Posting times must be at least {MinHoursBetweenPosts} hours apart."); break; }
+        }
+        return e;
+    }
 
     public static List<string> Validate(PlanSpec s, DateOnly today)
     {
@@ -68,7 +87,7 @@ public static class PlanLogic
         if (string.IsNullOrWhiteSpace(s.Channel) || s.Channel.Length > 60) e.Add("A channel is required.");
         if (s.Days is < 1 or > 60) e.Add("A plan covers between 1 and 60 days.");
         if (s.EveryDays is < 1 or > 14) e.Add("Posts can be 1 to 14 days apart.");
-        if (s.Days is >= 1 and <= 60 && s.EveryDays is >= 1 and <= 14 && SlotCount(s.Days, s.EveryDays) > MaxSlots) e.Add($"That is more than {MaxSlots} posts. Shorten the plan or space the posts out.");
+        if (s.Days is >= 1 and <= 60 && s.EveryDays is >= 1 and <= 14 && SlotCount(s.Days, s.EveryDays, PerDay(s)) > MaxSlots) e.Add($"That is more than {MaxSlots} posts. Shorten the plan, space the days out or post less often per day.");
         if (s.StartDate < today) e.Add("The plan cannot start in the past.");
         return e;
     }
@@ -76,8 +95,9 @@ public static class PlanLogic
     public static List<DateTimeOffset> SlotTimes(PlanSpec s)
     {
         var list = new List<DateTimeOffset>();
+        var times = new[] { s.TimeUtc }.Concat(s.MoreTimes ?? []).Distinct().OrderBy(t => t).ToList();
         for (var d = 0; d < s.Days; d += s.EveryDays)
-            list.Add(new DateTimeOffset(s.StartDate.AddDays(d).ToDateTime(s.TimeUtc), TimeSpan.Zero));
+            foreach (var t in times) list.Add(new DateTimeOffset(s.StartDate.AddDays(d).ToDateTime(t), TimeSpan.Zero));
         return list;
     }
 
@@ -134,7 +154,10 @@ public static class PlanLogic
         sb.AppendLine($"Plan name: {s.Name}");
         sb.AppendLine($"Goal: {s.Goal}");
         sb.AppendLine($"Channel: {s.Channel}{(string.IsNullOrWhiteSpace(s.Language) ? "" : $" (language: {s.Language})")}");
-        sb.AppendLine($"Length: {s.Days} day(s), {slots} post(s), one every {s.EveryDays} day(s), starting {s.StartDate:yyyy-MM-dd}.");
+        if (PerDay(s) > 1)
+            sb.AppendLine($"Length: {s.Days} day(s), {slots} post(s): {PerDay(s)} posts on every posting day (at {string.Join(", ", new[] { s.TimeUtc }.Concat(s.MoreTimes ?? []).OrderBy(t => t).Select(t => t.ToString("HH:mm")))} UTC), posting days {s.EveryDays} day(s) apart, starting {s.StartDate:yyyy-MM-dd}. Posts on the same day must cover different angles and open in different ways, so a follower never sees the same message twice in one day.");
+        else
+            sb.AppendLine($"Length: {s.Days} day(s), {slots} post(s), one every {s.EveryDays} day(s), starting {s.StartDate:yyyy-MM-dd}.");
         if (!string.IsNullOrWhiteSpace(leaderboard))
         {
             sb.AppendLine();

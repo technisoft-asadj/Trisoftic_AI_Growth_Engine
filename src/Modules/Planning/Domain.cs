@@ -104,6 +104,8 @@ public sealed class AutopilotSettings : IOrganizationScoped
     public int PlanDays { get; set; } = 7;
     public int EveryDays { get; set; } = 1;
     public TimeOnly PostTimeUtc { get; set; } = new(13, 0);
+    /// <summary>Further posting times on each posting day, as "HH:mm,HH:mm" (UTC), so a day can carry up to three posts. Empty means one post a day at PostTimeUtc.</summary>
+    public string ExtraPostTimesUtc { get; set; } = "";
     /// <summary>Hard ceiling on posts per product, channel and UTC day, whatever the plan says.</summary>
     public int MaxPostsPerDay { get; set; } = 2;
     /// <summary>May add pictures: the product's own uploaded pictures first, AI cartoon pictures otherwise.</summary>

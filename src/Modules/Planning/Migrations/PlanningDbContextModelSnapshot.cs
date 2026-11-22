@@ -102,6 +102,10 @@ namespace TriSoftic.GrowthEngine.Modules.Planning.Migrations
                     b.Property<int>("EveryDays")
                         .HasColumnType("integer");
 
+                    b.Property<string>("ExtraPostTimesUtc")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("Goal")
                         .IsRequired()
                         .HasMaxLength(2000)

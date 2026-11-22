@@ -61,7 +61,7 @@ public sealed class PlanOps(PlanningDbContext db, IProductKnowledge knowledge, I
             learnings = $"Headline: {r.Headline} (confidence: {r.Confidence})\nLearnings: {string.Join(" | ", r.Learnings)}\nWorked: {string.Join(" | ", r.WhatWorked)}\nDid not work: {string.Join(" | ", r.WhatDidNot)}\nSuggested next goal: {r.NextPlan.Goal}\nSuggested angles: {string.Join(" | ", r.NextPlan.SuggestedAngles.Select(a => $"{a.Angle} ({a.Why})"))}\nCaveats: {string.Join(" | ", r.Caveats)}";
         }
 
-        var slotCount = PlanLogic.SlotCount(spec.Days, spec.EveryDays);
+        var slotCount = PlanLogic.SlotCount(spec.Days, spec.EveryDays, PlanLogic.PerDay(spec));
         var table = await LeaderboardEndpoint.BuildAsync(catalog, perf, cfg, productId, spec.Channel, ct);
         var testLines = await tests.ConcludedSummariesAsync(productId, ct);
         var open = await register.OpenAsync(productId, ct);

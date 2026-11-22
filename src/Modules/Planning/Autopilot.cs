@@ -73,11 +73,12 @@ public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductK
         var start = coverageEnd > today ? coverageEnd : today.AddDays(1);
         // learn from the most recent review of any plan of this product
         var latest = await (from r in db.Reviews join p in db.Plans on r.PlanId equals p.Id where p.ProductId == s.ProductId orderby r.CreatedAt descending select r.Id).FirstOrDefaultAsync(ct);
-        var spec = new PlanSpec($"Autopilot {start:yyyy-MM-dd}", s.Goal, s.Channel, s.Language, start, s.PlanDays, s.EveryDays, s.PostTimeUtc);
+        var more = ParseTimes(s.ExtraPostTimesUtc);
+        var spec = new PlanSpec($"Autopilot {start:yyyy-MM-dd}", s.Goal, s.Channel, s.Language, start, s.PlanDays, s.EveryDays, s.PostTimeUtc, more.Count == 0 ? null : more);
         var videos = s.UseVideos ? await ops.CountFreeVideosAsync(s.ProductId, ct) : 0;
         var visuals = s.UseImages || videos > 0 ? new VisualOptions(s.UseImages, videos) : null;
         var r2 = await ops.CreatePlanAsync(s.ProductId, spec, latest == Guid.Empty ? null : latest, managed: true, actor: null, ct, visuals);
-        if (r2.Ok) { notes.Add($"Planned {PlanLogic.SlotCount(s.PlanDays, s.EveryDays)} posts starting {start:yyyy-MM-dd}."); return; }
+        if (r2.Ok) { notes.Add($"Planned {PlanLogic.SlotCount(s.PlanDays, s.EveryDays, PlanLogic.PerDay(spec))} posts starting {start:yyyy-MM-dd}."); return; }
         notes.Add("Could not plan: " + r2.Error!.Title);
         if (r2.Error.Status is 402 or 503) throw new AiException(r2.Error.Title, r2.Error.Outcome == "Paused" ? AiOutcome.Paused : AiOutcome.BudgetBlocked);
     }
@@ -229,6 +230,8 @@ public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductK
         }
     }
 
+    public static List<TimeOnly> ParseTimes(string? csv) => string.IsNullOrWhiteSpace(csv) ? [] : [.. csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => TimeOnly.TryParse(x, out var t) ? t : (TimeOnly?)null).Where(t => t is not null).Select(t => t!.Value)];
+
     private static string Trim(string v, int n) => v.Length <= n ? v : v[..n];
 
     private async Task Log(Guid productId, Guid? planId, Guid? slotId, Guid? itemId, int version, string verdict, int attempt, string reasons, IReadOnlyList<object> checks, string model, decimal cost, CancellationToken ct)
@@ -313,7 +316,7 @@ public static class AutopilotRegistration
 
 public static class AutopilotEndpoints
 {
-    public sealed record SettingsRequest(bool Enabled, string? Channel, string? Language, string? Goal, int? PlanDays, int? EveryDays, string? PostTimeUtc, int? MaxPostsPerDay, int? LookaheadHours, bool? UseImages = null, bool? UseVideos = null);
+    public sealed record SettingsRequest(bool Enabled, string? Channel, string? Language, string? Goal, int? PlanDays, int? EveryDays, string? PostTimeUtc, IReadOnlyList<string>? PostTimesUtc, int? MaxPostsPerDay, int? LookaheadHours, bool? UseImages = null, bool? UseVideos = null);
 
     public static void Map(RouteGroupBuilder g)
     {
@@ -332,7 +335,7 @@ public static class AutopilotEndpoints
             var week = await db.Decisions.AsNoTracking().Where(d => d.ProductId == productId && d.CreatedAt >= since).GroupBy(d => d.Verdict).Select(x => new { verdict = x.Key, n = x.Count(), cost = x.Sum(y => y.CostUsd) }).ToListAsync(ct);
             return Results.Ok(new
             {
-                s.Enabled, s.Channel, s.Language, s.Goal, s.PlanDays, s.EveryDays, postTimeUtc = s.PostTimeUtc.ToString("HH:mm"), s.MaxPostsPerDay, s.LookaheadHours, s.UseImages, s.UseVideos, s.LastRunAt, s.LastRunNote,
+                s.Enabled, s.Channel, s.Language, s.Goal, s.PlanDays, s.EveryDays, postTimeUtc = s.PostTimeUtc.ToString("HH:mm"), postTimesUtc = new[] { s.PostTimeUtc }.Concat(AutopilotEngine.ParseTimes(s.ExtraPostTimesUtc)).OrderBy(t => t).Select(t => t.ToString("HH:mm")), s.MaxPostsPerDay, s.LookaheadHours, s.UseImages, s.UseVideos, s.LastRunAt, s.LastRunNote,
                 needsYou, week,
                 decisions = decisions.Select(d => new { d.Id, d.ContentItemId, d.Version, d.Verdict, d.Attempt, d.Reasons, d.CostUsd, d.CreatedAt, checks = JsonSerializer.Deserialize<JsonElement>(d.ChecksJson) }),
             });
@@ -349,10 +352,17 @@ public static class AutopilotEndpoints
             var planDays = req.PlanDays ?? 7; var every = req.EveryDays ?? 1; var cap = req.MaxPostsPerDay ?? 2; var look = req.LookaheadHours ?? 72;
             if (planDays is < 3 or > 31) errors.Add("A plan covers 3 to 31 days.");
             if (every is < 1 or > 7) errors.Add("Posts can be 1 to 7 days apart.");
-            if (PlanLogic.SlotCount(planDays, every) > PlanLogic.MaxSlots) errors.Add("That is too many posts per plan.");
             if (cap is < 1 or > 5) errors.Add("The daily cap is 1 to 5 posts.");
             if (look is < 24 or > 168) errors.Add("Posts are written 24 to 168 hours ahead.");
-            if (!TimeOnly.TryParse(req.PostTimeUtc ?? "13:00", out var time)) errors.Add("The posting time is not valid (HH:mm, UTC).");
+            // posting times: the list when given, otherwise the single time; the earliest is the main one
+            var rawTimes = req.PostTimesUtc is { Count: > 0 } ? req.PostTimesUtc : [req.PostTimeUtc ?? "13:00"];
+            var times = new List<TimeOnly>();
+            foreach (var rt in rawTimes) { if (TimeOnly.TryParse(rt, out var tt)) times.Add(tt); else errors.Add($"The posting time {rt} is not valid (HH:mm, UTC)."); }
+            times = [.. times.Distinct().OrderBy(t => t)];
+            if (times.Count > 0) errors.AddRange(PlanLogic.ValidateTimes(times));
+            if (times.Count > 0 && cap < times.Count) errors.Add($"The daily limit ({cap}) is lower than the number of posting times ({times.Count}).");
+            if (times.Count > 0 && every is >= 1 and <= 7 && planDays is >= 3 and <= 31 && PlanLogic.SlotCount(planDays, every, times.Count) > PlanLogic.MaxSlots) errors.Add("That is too many posts per plan. Shorten the plan, space the days out or post less often per day.");
+            var time = times.Count > 0 ? times[0] : default;
             if (errors.Count > 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["autopilot"] = [.. errors] });
             var language = string.IsNullOrWhiteSpace(req.Language) ? null : req.Language.Trim();
             if (req.Enabled)
@@ -364,7 +374,7 @@ public static class AutopilotEndpoints
             var s = await db.Autopilot.FirstOrDefaultAsync(x => x.ProductId == productId, ct);
             var was = s?.Enabled ?? false;
             if (s is null) { s = new AutopilotSettings { ProductId = productId }; db.Autopilot.Add(s); }
-            s.Enabled = req.Enabled; s.Channel = channel; s.Language = language; s.Goal = goal; s.PlanDays = planDays; s.EveryDays = every; s.PostTimeUtc = time; s.MaxPostsPerDay = cap; s.LookaheadHours = look; s.UseImages = req.UseImages ?? true; s.UseVideos = req.UseVideos ?? true;
+            s.Enabled = req.Enabled; s.Channel = channel; s.Language = language; s.Goal = goal; s.PlanDays = planDays; s.EveryDays = every; s.PostTimeUtc = time; s.ExtraPostTimesUtc = string.Join(",", times.Skip(1).Select(t => t.ToString("HH:mm"))); s.MaxPostsPerDay = cap; s.LookaheadHours = look; s.UseImages = req.UseImages ?? true; s.UseVideos = req.UseVideos ?? true;
             s.UpdatedBy = u.UserId; s.UpdatedAt = clock.UtcNow;
             await db.SaveChangesAsync(ct);
             await audit.WriteAsync(new AuditEntry(req.Enabled ? (was ? "autopilot.updated" : "autopilot.enabled") : "autopilot.disabled", "Product", productId.ToString(), productId, goal.Length > 120 ? goal[..120] : goal, After: new { channel, planDays, every, cap, look }), ct);
