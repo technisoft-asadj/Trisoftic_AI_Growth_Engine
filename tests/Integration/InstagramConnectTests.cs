@@ -89,4 +89,38 @@ public sealed class InstagramConnectTests(TestHost host)
         var fid = (await facebook.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
         Assert.True((await admin.PostAsync($"/api/v1/content/{fid}/submit", null)).IsSuccessStatusCode);   // Facebook still takes text-only
     }
+
+    private async Task<Guid> ConnectFacebookPageAsync(HttpClient admin, Guid pid, string pageId)
+    {
+        var pending = await PendingAsync(admin, pid, "");
+        (await admin.PostAsJsonAsync($"/api/v1/publishing/connect/pending/{pending}/select", new { pageId })).EnsureSuccessStatusCode();
+        return pending;
+    }
+
+    [Fact]
+    public async Task Instagram_offers_only_the_Page_the_product_already_posts_to_even_when_Facebooks_list_leaves_it_out_and_the_login_is_recorded()
+    {
+        var admin = await host.LoginAdminAsync();
+
+        // a product whose Facebook Page the Pages list will not return
+        var hidden = await ProductAsync(admin);
+        FakeFacebookGraph.ListIncludesHidden = true;
+        try { await ConnectFacebookPageAsync(admin, hidden, "333"); } finally { FakeFacebookGraph.ListIncludesHidden = false; }
+        var pending = await PendingAsync(admin, hidden, "&kind=instagram");
+        var offered = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/publishing/connect/pending/{pending}", Json);
+        Assert.Equal(["Hidden Page"], offered.EnumerateArray().Select(p => p.GetProperty("name").GetString()));          // found by asking for it directly, and nothing else is offered
+        var sel = await admin.PostAsJsonAsync($"/api/v1/publishing/connect/pending/{pending}/select", new { pageId = "333" });
+        Assert.Equal(HttpStatusCode.OK, sel.StatusCode);
+
+        // another product: its own Page is offered, not the other Pages of the same login
+        var other = await ProductAsync(admin);
+        await ConnectFacebookPageAsync(admin, other, "111");
+        var p2 = await PendingAsync(admin, other, "&kind=instagram");
+        var offered2 = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/publishing/connect/pending/{p2}", Json);
+        Assert.Equal(["Ludo Fight Official"], offered2.EnumerateArray().Select(p => p.GetProperty("name").GetString()));
+
+        var audit = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/governance/audit?productId={hidden}", Json);
+        var entry = audit.GetProperty("items").EnumerateArray().First(e => e.GetProperty("action").GetString() == "publishing.connect.diagnostics");
+        Assert.Contains("Test Owner", entry.GetRawText());
+    }
 }

@@ -237,7 +237,7 @@ public static class PublishingModule
     // the route is anonymous and trusts only the signed, expiring state that was minted for a signed-in user.
     private static void MapCallback(IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/v1/publishing/connect/facebook/callback", async (string? code, string? state, string? error, PublishingDbContext db, IFacebookGraph fb, IDataProtectionProvider dp, TokenVault vault, IClock clock, IConfiguration cfg, CancellationToken ct) =>
+        app.MapGet("/api/v1/publishing/connect/facebook/callback", async (string? code, string? state, string? error, PublishingDbContext db, IFacebookGraph fb, IDataProtectionProvider dp, TokenVault vault, IClock clock, IConfiguration cfg, IAuditWriter audit, CancellationToken ct) =>
         {
             var web = (cfg["Publishing:WebBaseUrl"] ?? "").TrimEnd('/');
             if (!string.IsNullOrEmpty(error) || string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state)) return Results.Redirect($"{web}/publishing/connect?error=denied");
@@ -248,7 +248,23 @@ public static class PublishingModule
             try
             {
                 var userToken = await fb.ExchangeCodeAsync(code, ct);
-                var pages = await fb.ListPagesAsync(userToken, ct);
+                var listed = (await fb.ListPagesAsync(userToken, ct)).ToList();
+                var pages = listed.ToList();
+                // For Instagram the Page is the one this product already posts to. Facebook's Pages list can leave a Page out, so fetch it directly, and offer only that one.
+                var own = s.Kind == "instagram" ? await db.Accounts.AsNoTracking().Where(a => a.ProductId == s.ProductId && a.Provider == "facebook-page" && a.Status != AccountStatus.Disconnected).Select(a => new { a.ExternalId, a.DisplayName }).FirstOrDefaultAsync(ct) : null;
+                var direct = "not needed";
+                if (own is not null)
+                {
+                    if (pages.All(p => p.Id != own.ExternalId))
+                    {
+                        var (pg, perr) = await fb.GetPageAsync(own.ExternalId, userToken, ct);
+                        if (pg is not null) { pages.Add(pg); direct = "found by direct lookup"; } else direct = "not reachable: " + perr;
+                    }
+                    if (pages.Any(p => p.Id == own.ExternalId)) pages = [.. pages.Where(p => p.Id == own.ExternalId)];
+                }
+                var diag = await fb.DiagnoseAsync(userToken, ct);
+                await audit.WriteAsync(new AuditEntry("publishing.connect.diagnostics", "ChannelAccount", null, s.ProductId, $"{s.Kind ?? "facebook"} login by {diag.UserName}",
+                    After: new { user = diag.UserName, diag.UserId, diag.Scopes, granted = diag.Granular, pagesListed = listed.Select(p => $"{p.Name} ({p.Id})"), productPage = own, direct }), ct);
                 if (pages.Count == 0) return Results.Redirect($"{web}/publishing/connect?error=nopages");
                 var pending = new PendingConnection { ProductId = s.ProductId, UserId = s.UserId, Provider = (s.Kind == "instagram" ? "instagram|" : "facebook-page|") + s.Channel, PagesJsonCipher = vault.Seal(JsonSerializer.Serialize(pages)), ExpiresAt = clock.UtcNow.AddMinutes(15) };
                 db.Pending.Add(pending);

@@ -141,12 +141,20 @@ public sealed class FakeFacebookGraph : TriSoftic.GrowthEngine.Modules.Publishin
     public string AuthorizeUrl(string state, bool instagram = false) => "https://facebook.test/dialog?state=" + Uri.EscapeDataString(state) + (instagram ? "&instagram=1" : "");
     public static string? InstagramUsername = "ludofight_official";
     public static string[] Scopes = ["pages_show_list", "instagram_basic", "instagram_content_publish"];
+    /// <summary>A Page the user manages that the Pages list leaves out (but a direct lookup finds).</summary>
+    public static bool ListIncludesHidden = false;
+    public Task<TriSoftic.GrowthEngine.Modules.Publishing.LoginDiagnostics> DiagnoseAsync(string userToken, CancellationToken ct)
+        => Task.FromResult(new TriSoftic.GrowthEngine.Modules.Publishing.LoginDiagnostics("999", "Test Owner", Scopes, new Dictionary<string, IReadOnlyList<string>> { ["pages_show_list"] = ["111", "222"] }));
+    public Task<(TriSoftic.GrowthEngine.Modules.Publishing.PageInfo? Page, string? Error)> GetPageAsync(string pageId, string userToken, CancellationToken ct)
+        => Task.FromResult<(TriSoftic.GrowthEngine.Modules.Publishing.PageInfo?, string?)>(pageId == "333" ? (new("333", "Hidden Page", "page-secret-token-333"), null) : (null, "(#100) No permission to access this Page"));
     public Task<IReadOnlyList<string>> GrantedScopesAsync(string token, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>(Scopes);
     public Task<TriSoftic.GrowthEngine.Modules.Publishing.InstagramAccount?> GetInstagramAccountAsync(string pageId, string pageToken, CancellationToken ct)
         => Task.FromResult<TriSoftic.GrowthEngine.Modules.Publishing.InstagramAccount?>(InstagramUsername is null ? null : new("17841400000000001", InstagramUsername));
     public Task<string> ExchangeCodeAsync(string code, CancellationToken ct) => Task.FromResult("user-token-for-" + code);
     public Task<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageInfo>> ListPagesAsync(string userToken, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageInfo>>([new("111", "Ludo Fight Official", "page-secret-token-111"), new("222", "Other Page", "page-secret-token-222")]);
+        => Task.FromResult<IReadOnlyList<TriSoftic.GrowthEngine.Modules.Publishing.PageInfo>>(ListIncludesHidden
+            ? [new("111", "Ludo Fight Official", "page-secret-token-111"), new("222", "Other Page", "page-secret-token-222"), new("333", "Hidden Page", "page-secret-token-333")]
+            : [new("111", "Ludo Fight Official", "page-secret-token-111"), new("222", "Other Page", "page-secret-token-222")]);
 }
 
 /// <summary>Captures outgoing email instead of sending it.</summary>

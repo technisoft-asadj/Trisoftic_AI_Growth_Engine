@@ -122,7 +122,13 @@ public interface IFacebookGraph
     Task<InstagramAccount?> GetInstagramAccountAsync(string pageId, string pageToken, CancellationToken ct);
     /// <summary>The permissions Facebook says a token actually carries, for explaining a failed connection. Empty when they cannot be read.</summary>
     Task<IReadOnlyList<string>> GrantedScopesAsync(string token, CancellationToken ct);
+    /// <summary>Who logged in and exactly what Facebook granted (permissions, and for each one the Pages or accounts it covers). For explaining a connection that shows the wrong Pages.</summary>
+    Task<LoginDiagnostics> DiagnoseAsync(string userToken, CancellationToken ct);
+    /// <summary>One Page fetched by its id with the user's token. Works for a Page the user manages even when the Pages list leaves it out. Page is null, with the reason, when Facebook refuses.</summary>
+    Task<(PageInfo? Page, string? Error)> GetPageAsync(string pageId, string userToken, CancellationToken ct);
 }
+
+public sealed record LoginDiagnostics(string? UserId, string? UserName, IReadOnlyList<string> Scopes, IReadOnlyDictionary<string, IReadOnlyList<string>> Granular);
 
 public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) : IFacebookGraph, IChannelPublisher
 {
@@ -176,6 +182,37 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
             return res.GetProperty("data").TryGetProperty("scopes", out var sc) && sc.ValueKind == JsonValueKind.Array ? [.. sc.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0)] : [];
         }
         catch (Exception ex) when (ex is PublishException or KeyNotFoundException) { return []; }
+    }
+
+    public async Task<LoginDiagnostics> DiagnoseAsync(string userToken, CancellationToken ct)
+    {
+        string? id = null, name = null; var scopes = new List<string>(); var granular = new Dictionary<string, IReadOnlyList<string>>();
+        try
+        {
+            var data = (await GetJson($"{Base}/debug_token?input_token={Uri.EscapeDataString(userToken)}&access_token={AppId}|{AppSecret}", ct)).GetProperty("data");
+            if (data.TryGetProperty("user_id", out var u)) id = u.GetString();
+            if (data.TryGetProperty("scopes", out var sc) && sc.ValueKind == JsonValueKind.Array) scopes.AddRange(sc.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0));
+            if (data.TryGetProperty("granular_scopes", out var gs) && gs.ValueKind == JsonValueKind.Array)
+                foreach (var g in gs.EnumerateArray())
+                    granular[g.TryGetProperty("scope", out var n) ? n.GetString() ?? "" : ""] = g.TryGetProperty("target_ids", out var t) && t.ValueKind == JsonValueKind.Array ? [.. t.EnumerateArray().Select(x => x.GetString() ?? "")] : [];
+        }
+        catch (Exception ex) when (ex is PublishException or KeyNotFoundException) { /* partial answer is still useful */ }
+        try { var me = await GetJson($"{Base}/me?fields=id,name&access_token={Uri.EscapeDataString(userToken)}", ct); name = me.TryGetProperty("name", out var n) ? n.GetString() : null; id ??= me.TryGetProperty("id", out var i) ? i.GetString() : null; }
+        catch (PublishException) { }
+        return new LoginDiagnostics(id, name, scopes, granular);
+    }
+
+    public async Task<(PageInfo? Page, string? Error)> GetPageAsync(string pageId, string userToken, CancellationToken ct)
+    {
+        try
+        {
+            var res = await GetJson($"{Base}/{Uri.EscapeDataString(pageId)}?fields=id,name,access_token&access_token={Uri.EscapeDataString(userToken)}", ct);
+            var token = res.TryGetProperty("access_token", out var t) ? t.GetString() : null;
+            return string.IsNullOrEmpty(token)
+                ? (null, "Facebook returned the Page but no Page token: this login does not have full control of it")
+                : (new PageInfo(res.GetProperty("id").GetString()!, res.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "", token), null);
+        }
+        catch (PublishException ex) { return (null, ex.Message); }
     }
 
     // ---- publishing ----
