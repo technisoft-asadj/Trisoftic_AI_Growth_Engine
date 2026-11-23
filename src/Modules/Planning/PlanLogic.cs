@@ -13,7 +13,8 @@ public sealed class Measure { public string Name { get; set; } = ""; public stri
 public sealed class PlannedPost { public string Angle { get; set; } = ""; public string Brief { get; set; } = ""; public string? HookType { get; set; } public string? Visual { get; set; } public string? ImageBrief { get; set; } public string? Tests { get; set; } }
 
 /// <summary>What the planner may use for pictures and video in this plan.</summary>
-public sealed record VisualOptions(bool Images, int VideosAvailable);
+/// <summary><paramref name="RequireVisual"/>: every post must carry a picture or video (the product also posts to Instagram, which has no text-only posts).</summary>
+public sealed record VisualOptions(bool Images, int VideosAvailable, bool RequireVisual = false);
 /// <summary>What the planner (AI) proposes. Dates and counts are never the AI's job: code works them out from the cadence.</summary>
 public sealed class PlanDraft
 {
@@ -118,6 +119,9 @@ public static class PlanLogic
         sb.AppendLine("6. Give every slot a \"hookType\", exactly one of: " + string.Join(", ", HookTypes.All) + ". Use a mix across the series.");
         if (visuals is not null)
         {
+            if (visuals.RequireVisual)
+                sb.AppendLine("7. Give every slot a \"visual\": \"image\" or \"video\". NEVER \"text\": these posts are also published on Instagram every day, and Instagram cannot show a post without a picture or video. Plan each post as a picture-first post: the visual carries the idea and the brief gives the writer a short, punchy caption. Where the LEADERBOARD has solid evidence for a visual type, favour it; otherwise mix pictures and (where available) video.");
+            else
             sb.AppendLine("7. Give every slot a \"visual\": \"text\" (words only), \"image\" or \"video\". Choose whatever is most likely to reach the goal. Where the LEADERBOARD has solid evidence for a visual type, favour it; otherwise mix them so the results teach us something (for example about a third text-only, a third with a picture, the rest video where possible).");
             sb.AppendLine(visuals.VideosAvailable > 0
                 ? $"   \"video\" is a Reel made from the owner's own uploaded vertical videos. Only {visuals.VideosAvailable} such video(s) are available for this plan, so use \"video\" at most {visuals.VideosAvailable} time(s)."
@@ -194,6 +198,7 @@ public static class PlanLogic
         if (visuals is not null)
         {
             if (d.Slots.Any(s => s.Visual is not ("text" or "image" or "video"))) v.Add("Every slot needs a visual: text, image or video.");
+            if (visuals.RequireVisual && d.Slots.Any(s => s.Visual == "text")) v.Add("Every post must have a picture or video (these posts also go to Instagram): use image or video, never text.");
             if (!visuals.Images && d.Slots.Any(s => s.Visual == "image")) v.Add("Pictures are switched off: do not use image.");
             var videos = d.Slots.Count(s => s.Visual == "video");
             if (videos > visuals.VideosAvailable) v.Add($"You used video {videos} time(s) but only {visuals.VideosAvailable} uploaded video(s) are available.");

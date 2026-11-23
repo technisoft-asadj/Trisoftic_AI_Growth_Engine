@@ -133,9 +133,10 @@ public sealed class InstagramMirrorTests(TestHost host)
     {
         var admin = await host.LoginAdminAsync(); var approver = await UserAsync(admin, "Approver");
         var pid = await ProductAsync(admin, approver, withInstagram: true);
-        (await SetAsync(admin, pid, alsoInstagram: true, images: false)).EnsureSuccessStatusCode();
+        (await SetAsync(admin, pid, alsoInstagram: false, images: false)).EnsureSuccessStatusCode();   // with Instagram on the planner must pick pictures, so make the text-only post first
         Script(PlanJson("text"), PostJson(), Approve1);
         Assert.Contains("Scheduled 1 post(s)", await RunAsync(admin, pid));
+        (await SetAsync(admin, pid, alsoInstagram: true, images: false)).EnsureSuccessStatusCode();
         Script();
         await RunAsync(admin, pid); await RunAsync(admin, pid);
         Assert.DoesNotContain(await ItemsAsync(admin, pid), i => i.GetProperty("channel").GetString() == "Instagram");

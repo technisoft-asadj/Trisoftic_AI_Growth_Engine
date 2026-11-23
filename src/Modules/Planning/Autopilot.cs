@@ -77,7 +77,8 @@ public sealed class AutopilotEngine(PlanningDbContext db, PlanOps ops, IProductK
         var more = ParseTimes(s.ExtraPostTimesUtc);
         var spec = new PlanSpec($"Autopilot {start:yyyy-MM-dd}", s.Goal, s.Channel, s.Language, start, s.PlanDays, s.EveryDays, s.PostTimeUtc, more.Count == 0 ? null : more);
         var videos = s.UseVideos ? await ops.CountFreeVideosAsync(s.ProductId, ct) : 0;
-        var visuals = s.UseImages || videos > 0 ? new VisualOptions(s.UseImages, videos) : null;
+        // posting on Instagram too means every post needs a picture or video, so pictures are used even if the plain setting is off
+        var visuals = s.AlsoInstagram ? new VisualOptions(true, videos, RequireVisual: true) : s.UseImages || videos > 0 ? new VisualOptions(s.UseImages, videos) : null;
         var r2 = await ops.CreatePlanAsync(s.ProductId, spec, latest == Guid.Empty ? null : latest, managed: true, actor: null, ct, visuals);
         if (r2.Ok) { notes.Add($"Planned {PlanLogic.SlotCount(s.PlanDays, s.EveryDays, PlanLogic.PerDay(spec))} posts starting {start:yyyy-MM-dd}."); return; }
         notes.Add("Could not plan: " + r2.Error!.Title);
