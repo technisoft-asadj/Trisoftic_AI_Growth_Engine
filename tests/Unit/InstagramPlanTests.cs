@@ -9,7 +9,7 @@ public sealed class InstagramPlanTests
     {
         Rationale = "A mix.",
         Measures = [new Measure { Name = "reach", Why = "shows interest" }],
-        Slots = [.. visuals.Select(v => new PlannedPost { Angle = "A " + v + Guid.NewGuid().ToString("N")[..4], Brief = "Cover a fact.", Visual = v, ImageBrief = v == "image" ? "A dice rolling across a colourful board." : null })],
+        Slots = [.. visuals.Select(v => new PlannedPost { Angle = "Angle " + v + new string((char)(97 + Random.Shared.Next(26)), 3) + new string((char)(97 + Random.Shared.Next(26)), 3), Brief = "Cover a fact.", Visual = v, ImageBrief = v == "image" ? "A dice rolling across a colourful board." : null })],
     };
 
     [Fact]
