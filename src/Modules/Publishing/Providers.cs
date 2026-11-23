@@ -120,6 +120,8 @@ public interface IFacebookGraph
     Task<IReadOnlyList<PageInfo>> ListPagesAsync(string userToken, CancellationToken ct);
     /// <summary>The Instagram professional account linked to a Page, or null when there is none.</summary>
     Task<InstagramAccount?> GetInstagramAccountAsync(string pageId, string pageToken, CancellationToken ct);
+    /// <summary>The permissions Facebook says a token actually carries, for explaining a failed connection. Empty when they cannot be read.</summary>
+    Task<IReadOnlyList<string>> GrantedScopesAsync(string token, CancellationToken ct);
 }
 
 public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) : IFacebookGraph, IChannelPublisher
@@ -164,6 +166,16 @@ public sealed class FacebookGraph(IHttpClientFactory http, IConfiguration cfg) :
         if (!res.TryGetProperty("instagram_business_account", out var ig) || ig.ValueKind != JsonValueKind.Object) return null;
         var id = ig.TryGetProperty("id", out var i) ? i.GetString() : null;
         return string.IsNullOrEmpty(id) ? null : new InstagramAccount(id, ig.TryGetProperty("username", out var u) ? u.GetString() ?? id : id);
+    }
+
+    public async Task<IReadOnlyList<string>> GrantedScopesAsync(string token, CancellationToken ct)
+    {
+        try
+        {
+            var res = await GetJson($"{Base}/debug_token?input_token={Uri.EscapeDataString(token)}&access_token={AppId}|{AppSecret}", ct);
+            return res.GetProperty("data").TryGetProperty("scopes", out var sc) && sc.ValueKind == JsonValueKind.Array ? [.. sc.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0)] : [];
+        }
+        catch (Exception ex) when (ex is PublishException or KeyNotFoundException) { return []; }
     }
 
     // ---- publishing ----

@@ -319,7 +319,7 @@ export function ConnectPage() {
   const pick = useMutation({ mutationFn: (pageId: string) => api.post(`/api/v1/publishing/connect/pending/${pending}/select`, { pageId }), onSuccess: () => nav('/publishing') })
   const reasons: Record<string, string> = {
     denied: 'Facebook did not give permission, so nothing was connected.', expired: 'That connection attempt expired. Please start again.',
-    nopages: 'That Facebook account does not manage any Pages.', facebook: 'Facebook could not complete the connection. Please try again.',
+    nopages: 'Facebook returned no Pages. Either this Facebook account manages none, or no Page was ticked in the Facebook window: start again, choose Edit settings or the Pages step, and select the Page (and its Instagram account).', facebook: 'Facebook could not complete the connection. Please try again.',
   }
   return (
     <>

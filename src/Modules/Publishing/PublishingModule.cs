@@ -119,7 +119,17 @@ public static class PublishingModule
                 InstagramAccount? ig;
                 try { ig = await fb.GetInstagramAccountAsync(page.Id, page.AccessToken, ct); }
                 catch (PublishException ex) { return Results.Problem(statusCode: 502, title: "Facebook could not look up the Instagram account: " + ex.Message); }
-                if (ig is null) return Results.Problem(statusCode: 409, title: $"No Instagram professional (Business or Creator) account is linked to the Page \"{page.Name}\". Link it in the Page settings under Linked accounts, then connect again.");
+                if (ig is null)
+                {
+                    // say what Facebook actually granted, so the cause is visible instead of guessed
+                    var granted = await fb.GrantedScopesAsync(page.AccessToken, ct);
+                    var missing = new[] { "instagram_basic", "instagram_content_publish" }.Where(x => !granted.Contains(x)).ToList();
+                    var why = granted.Count == 0 ? "" : missing.Count > 0
+                        ? $" Facebook did not give this login the permission {string.Join(" and ", missing)}: connect again, and when Facebook asks which Instagram accounts to allow, select the account and leave every permission switched on."
+                        : " The Instagram permissions were granted, so the Page itself has no linked Instagram professional account: check Page settings, Linked accounts.";
+                    await audit.WriteAsync(new AuditEntry("publishing.account.connect-failed", "ChannelAccount", null, p.ProductId, $"Instagram: none found for Page {page.Name}", After: new { granted }), ct);
+                    return Results.Problem(statusCode: 409, title: $"No Instagram professional (Business or Creator) account was found for the Page \"{page.Name}\".{why}");
+                }
                 var igAccount = await ReplaceAsync(db, p.ProductId, "instagram", "Instagram", ig.Id, "@" + ig.Username, vault.Seal(page.AccessToken), u.UserId, clock.UtcNow, ct);
                 db.Pending.Remove(p);
                 await db.SaveChangesAsync(ct);

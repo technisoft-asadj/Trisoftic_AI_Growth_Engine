@@ -140,6 +140,8 @@ public sealed class FakeFacebookGraph : TriSoftic.GrowthEngine.Modules.Publishin
     public bool IsConfigured => true;
     public string AuthorizeUrl(string state, bool instagram = false) => "https://facebook.test/dialog?state=" + Uri.EscapeDataString(state) + (instagram ? "&instagram=1" : "");
     public static string? InstagramUsername = "ludofight_official";
+    public static string[] Scopes = ["pages_show_list", "instagram_basic", "instagram_content_publish"];
+    public Task<IReadOnlyList<string>> GrantedScopesAsync(string token, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>(Scopes);
     public Task<TriSoftic.GrowthEngine.Modules.Publishing.InstagramAccount?> GetInstagramAccountAsync(string pageId, string pageToken, CancellationToken ct)
         => Task.FromResult<TriSoftic.GrowthEngine.Modules.Publishing.InstagramAccount?>(InstagramUsername is null ? null : new("17841400000000001", InstagramUsername));
     public Task<string> ExchangeCodeAsync(string code, CancellationToken ct) => Task.FromResult("user-token-for-" + code);

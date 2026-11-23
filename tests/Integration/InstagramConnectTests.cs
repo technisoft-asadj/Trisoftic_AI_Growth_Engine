@@ -64,9 +64,13 @@ public sealed class InstagramConnectTests(TestHost host)
             var sel = await admin.PostAsJsonAsync($"/api/v1/publishing/connect/pending/{pending}/select", new { pageId = "111" });
             Assert.Equal(HttpStatusCode.Conflict, sel.StatusCode);
             Assert.Contains("Linked accounts", await sel.Content.ReadAsStringAsync());
+            FakeFacebookGraph.Scopes = ["pages_show_list"];
+            var again = await admin.PostAsJsonAsync($"/api/v1/publishing/connect/pending/{await PendingAsync(admin, pid, "&kind=instagram")}/select", new { pageId = "111" });
+            var text = await again.Content.ReadAsStringAsync();
+            Assert.Contains("instagram_basic and instagram_content_publish", text); Assert.Contains("which Instagram accounts", text);
             Assert.Equal(0, (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/publishing/products/{pid}/accounts", Json)).GetArrayLength());
         }
-        finally { FakeFacebookGraph.InstagramUsername = before; }
+        finally { FakeFacebookGraph.InstagramUsername = before; FakeFacebookGraph.Scopes = ["pages_show_list", "instagram_basic", "instagram_content_publish"]; }
     }
 
     [Fact]
