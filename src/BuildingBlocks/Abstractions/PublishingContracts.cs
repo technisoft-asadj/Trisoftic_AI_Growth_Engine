@@ -26,5 +26,7 @@ public interface IContentPublishSource
     Task<StateChange> RequeueAsync(Guid itemId, int version, DateTimeOffset at, CancellationToken ct);
     /// <summary>PublishFailed -> Approved (give up on this attempt to publish; the approval stays valid).</summary>
     Task<StateChange> AbandonAsync(Guid itemId, int version, CancellationToken ct);
+    /// <summary>Content that has been Publishing since before the cutoff with nothing finishing it becomes PublishFailed (with the reason), so it can be retried. Returns how many.</summary>
+    Task<int> FailStuckAsync(DateTimeOffset notUpdatedSince, string reason, CancellationToken ct);
     Task<IReadOnlyList<FailedContent>> GetFailedAsync(IReadOnlyCollection<Guid>? productScope, CancellationToken ct);
 }

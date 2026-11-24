@@ -87,6 +87,7 @@ public sealed class ScriptedPublisher : TriSoftic.GrowthEngine.Modules.Publishin
         var K = TriSoftic.GrowthEngine.Modules.Publishing.PublishErrorKind.Retryable;
         switch (next)
         {
+            case "crash": throw new InvalidOperationException("boom");
             case "retryable": throw new TriSoftic.GrowthEngine.Modules.Publishing.PublishException(K, "rate limited");
             case "unknown-lost": throw new TriSoftic.GrowthEngine.Modules.Publishing.PublishException(TriSoftic.GrowthEngine.Modules.Publishing.PublishErrorKind.Unknown, "timeout");
             case "permanent": throw new TriSoftic.GrowthEngine.Modules.Publishing.PublishException(TriSoftic.GrowthEngine.Modules.Publishing.PublishErrorKind.Permanent, "text rejected by policy");

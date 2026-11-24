@@ -95,6 +95,12 @@ public sealed class PublishPipeline(PublishingDbContext db, IContentPublishSourc
             return;
         }
         catch (PublishException ex) { await HandleTerminal(item, account, attempt, ex, ct); return; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // a fault of our own (not the network's answer): never leave the post "Publishing" with nothing recorded. It is retried, and after the last try it shows as failed with the reason.
+            await Backoff(item, attempt, "Unexpected error while sending: " + ex.Message, null, lastAttempt, ct, AttemptStatus.Unknown);
+            return;
+        }
 
         await ConfirmAsync(item, account, attempt, result, ct);
     }
@@ -158,6 +164,8 @@ public sealed class DispatchHandler(IContentPublishSource content, IJobQueue job
 
     public async Task HandleAsync(JobContext c, CancellationToken ct)
     {
+        // a post that has been "Publishing" for far longer than all the retries can take lost its worker: show it as failed so it can be retried, instead of waiting forever
+        await content.FailStuckAsync(clock.UtcNow.AddMinutes(-45), "Publishing did not finish (the worker stopped or the attempt was lost). Check the account, then retry; the retry looks for an existing post first.", ct);
         foreach (var due in await content.GetDueAsync(clock.UtcNow, 100, ct))
             await jobs.EnqueueAsync(new JobRequest(PublishPipeline.PublishJob, JsonSerializer.Serialize(new { itemId = due.ItemId, version = due.Version }),
                 IdempotencyKey: $"pub:{due.ItemId}:{due.Version}:{due.ScheduledFor.UtcTicks}", ProductId: due.ProductId, MaxAttempts: 4), ct);

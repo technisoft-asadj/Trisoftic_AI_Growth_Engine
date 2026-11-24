@@ -35,6 +35,14 @@ public sealed class ContentPublishSource(ContentDbContext db, IClock clock) : IC
     public Task<StateChange> RequeueAsync(Guid itemId, int version, DateTimeOffset at, CancellationToken ct) => ChangeAsync(itemId, i => i.Requeue(version, at), ct);
     public Task<StateChange> AbandonAsync(Guid itemId, int version, CancellationToken ct) => ChangeAsync(itemId, i => i.Abandon(version), ct);
 
+    public async Task<int> FailStuckAsync(DateTimeOffset notUpdatedSince, string reason, CancellationToken ct)
+    {
+        var stuck = await db.Items.Where(i => i.Status == ContentStatus.Publishing && i.UpdatedAt < notUpdatedSince).Take(50).ToListAsync(ct);
+        foreach (var i in stuck) { i.FailPublish(i.CurrentVersion, reason); i.UpdatedAt = clock.UtcNow; }
+        if (stuck.Count > 0) await db.SaveChangesAsync(ct);
+        return stuck.Count;
+    }
+
     public async Task<IReadOnlyList<FailedContent>> GetFailedAsync(IReadOnlyCollection<Guid>? productScope, CancellationToken ct)
     {
         var q = db.Items.AsNoTracking().Where(i => i.Status == ContentStatus.PublishFailed);

@@ -9,7 +9,8 @@ public sealed partial class FileSystemObjectStorage(IConfiguration config) : IOb
 {
     private readonly string _root = Path.GetFullPath(config["Storage:Root"] ?? Path.Combine(AppContext.BaseDirectory, "data", "objects"));
 
-    [GeneratedRegex(@"^[a-z0-9]+(/[a-z0-9\-]+)*$")]
+    // lower-case letters, digits and hyphens in each folder or file name, and one extension dot on the last name ("public-tmp/3f2a.jpg"); never "..", never a leading dot
+    [GeneratedRegex(@"^[a-z0-9][a-z0-9\-]*(/[a-z0-9][a-z0-9\-]*)*(\.[a-z0-9]+)?$")]
     private static partial Regex SafeKey();
 
     private string PathFor(string key)

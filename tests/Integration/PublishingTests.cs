@@ -262,6 +262,20 @@ public sealed class PublishingTests(TestHost host)
     }
 
     [Fact]
+    public async Task An_unexpected_fault_while_sending_ends_as_failed_with_the_reason_not_stuck_in_Publishing()
+    {
+        var admin = await host.LoginAdminAsync(); var approver = await UserAsync(admin, "Approver");
+        var pid = await ProductAsync(admin); await ConnectSandbox(admin, pid);
+        var text = "Crashes " + Uniq(); ScriptedPublisher.Queue(text, "crash", "crash", "crash", "crash", "crash");
+        var (id, _) = await ScheduledAsync(admin, approver, pid, text);
+
+        Assert.Equal("PublishFailed", await WaitForAsync(admin, id, "Published", "PublishFailed"));
+        var f = (await admin.GetFromJsonAsync<JsonElement>("/api/v1/publishing/failures", Json)).EnumerateArray().Single(x => x.GetProperty("itemId").GetGuid() == id);
+        Assert.Contains("boom", f.GetProperty("reason").GetString());
+        Assert.Equal(0, ScriptedPublisher.LiveCount(text));
+    }
+
+    [Fact]
     public async Task A_revoked_account_is_flagged_for_reconnecting_and_publishing_resumes_after_reconnect()
     {
         var admin = await host.LoginAdminAsync(); var approver = await UserAsync(admin, "Approver");
