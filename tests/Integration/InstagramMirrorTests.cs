@@ -115,14 +115,10 @@ public sealed class InstagramMirrorTests(TestHost host)
         Assert.Equal("Post", igFull.GetProperty("item").GetProperty("format").GetString());
         Assert.Equal(asset, igFull.GetProperty("current").GetProperty("assetIds")[0].GetGuid());
         var fbBody = fbFull.GetProperty("current").GetProperty("body").GetString()!; var igBody = igFull.GetProperty("current").GetProperty("body").GetString()!;
-        var fbLink = System.Text.RegularExpressions.Regex.Match(fbBody, @"https://app\.test/r/\w+").Value; var igLink = System.Text.RegularExpressions.Regex.Match(igBody, @"https://app\.test/r/\w+").Value;
-        Assert.NotEmpty(fbLink); Assert.NotEmpty(igLink); Assert.NotEqual(fbLink, igLink);                    // Instagram clicks are counted on their own link
-        Assert.Equal(fbBody.Replace(fbLink, igLink), igBody);                                                  // otherwise the words are identical
-
-        var visitor = host.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { HandleCookies = false, AllowAutoRedirect = false });
-        var click = new HttpRequestMessage(HttpMethod.Get, "/r/" + igLink[(igLink.LastIndexOf('/') + 1)..]);
-        click.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Linux; Android 13) Chrome/120 Mobile Safari/537.36");
-        Assert.Contains("utm_source%3Dinstagram", (await visitor.SendAsync(click)).Headers.Location!.ToString());
+        var fbLink = System.Text.RegularExpressions.Regex.Match(fbBody, @"https://app\.test/r/\w+").Value;
+        Assert.NotEmpty(fbLink);                                                                               // Facebook keeps its tappable tracked link
+        Assert.DoesNotContain("/r/", igBody);                                                                  // Instagram does not make caption links tappable: it points to the bio link instead
+        Assert.Equal(fbBody.Replace(fbLink, TriSoftic.GrowthEngine.Modules.Planning.InstagramMirrorService.BioLinkText), igBody);                      // otherwise the words are identical
 
         await RunAsync(admin, pid);                                  // another pass makes no second copy
         Assert.Single(await ItemsAsync(admin, pid), i => i.GetProperty("channel").GetString() == "Instagram");

@@ -157,7 +157,8 @@ public static partial class UrlTracking
 
 public sealed partial class TrackedLinksService(LinksDbContext db, IConfiguration cfg, IClock clock) : ITrackedLinks
 {
-    private const string Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    // no 0 O 1 I l: they look alike, so a code typed by hand from a screenshot would fail
+    private const string Alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz";
 
     public async Task<TrackedLink?> CreateAsync(Guid productId, string destinationUrl, string channel, string campaign, string? label, CancellationToken ct = default)
     {

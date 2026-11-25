@@ -32,6 +32,8 @@ public sealed class InstagramMirrorService(PlanningDbContext db, IContentPublish
     IAgentApprovals agent, IAssetCatalog assets, IProductKnowledge knowledge, IClock clock, IAuditWriter audit)
 {
     public const string ChannelName = "Instagram";
+    /// <summary>What replaces a tracked link in the Instagram copy of a post (Instagram does not make caption links tappable).</summary>
+    public const string BioLinkText = "Link in bio 🔗";
     private const int MaxNewPerRun = 3;
     private const string Subject = "ContentItem";
 
@@ -73,9 +75,9 @@ public sealed class InstagramMirrorService(PlanningDbContext db, IContentPublish
             if (skip is not null) { row.Status = "Skipped"; row.Note = skip; db.Mirrors.Add(row); await db.SaveChangesAsync(ct); continue; }
 
             var body = c.Body; var linkIds = new List<Guid>();
+            // the product's own short links become "Link in bio"; any other address stays as written
             foreach (var url in AutopilotGates.UrlsIn(body).Distinct(StringComparer.OrdinalIgnoreCase))
-                if ((await links.OwnShortUrlsAsync(s.ProductId, [url], ct)).Contains(url))
-                    if (await links.RetargetAsync(s.ProductId, url, ChannelName, $"{c.Title} (Instagram)", ct) is { } own) { body = body.Replace(url, own.ShortUrl, StringComparison.OrdinalIgnoreCase); linkIds.Add(own.Id); }
+                if ((await links.OwnShortUrlsAsync(s.ProductId, [url], ct)).Contains(url)) body = body.Replace(url, BioLinkText, StringComparison.OrdinalIgnoreCase);
 
             var title = c.Title.Length > 180 ? c.Title[..180] : c.Title;
             var itemId = await content.CreateAsync(new NewContent(s.ProductId, $"{title} (Instagram)", ChannelName, format, null, body, null, media.Select(m => m.Id).ToList(), slot.HookType), ct);
