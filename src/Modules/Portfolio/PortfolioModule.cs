@@ -31,6 +31,7 @@ public static class PortfolioModule
             ("Pharmacy POS", ProductKind.BusinessSoftware),
             ("Clothing Shop POS", ProductKind.BusinessSoftware),
             ("Hardware Shop POS", ProductKind.BusinessSoftware),
+            ("Software development company", ProductKind.BusinessSoftware),
         ];
         var existing = (await db.Categories.Select(x => x.Name).ToListAsync(ct)).ToHashSet();
         foreach (var (name, kind) in wanted.Where(w => !existing.Contains(w.Name)))
